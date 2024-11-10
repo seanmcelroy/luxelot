@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Messages";
+
+message Envelope {
+    bytes nonce = 1;
+    bytes ciphertext = 2;
+    bytes tag = 3;
+    bytes associated_data = 4;
+}

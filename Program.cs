@@ -1,13 +1,8 @@
-﻿using System.Collections.Concurrent;
-using System.Net;
-using System.Net.Sockets;
+﻿using System.Net;
 using Microsoft.Extensions.Logging;
 
 internal class Program
 {
-    private static readonly ConcurrentDictionary<TaskEntry, Task> Tasks = [];
-    private static readonly ConcurrentDictionary<PeerEntry, TcpClient> Peers = [];
-
     private async static Task Main(string[] args)
     {
         Console.WriteLine("Luxelot");
@@ -16,6 +11,7 @@ internal class Program
         using ILoggerFactory factory = LoggerFactory.Create(builder =>
             builder
             .AddFilter("Luxelot", LogLevel.Trace)
+            .AddFilter("Node", LogLevel.Trace)
             .AddConsole());
 
         CancellationTokenSource cts = new();
@@ -33,8 +29,8 @@ internal class Program
         };
 
         var tasks = new Task[]{
-            Task.Run(async () => await alice.Main(cts.Token)),
-            Task.Run(async () => await bob.Main(cts.Token))
+            Task.Run(async () => await alice.Main(cts.Token), cts.Token),
+            Task.Run(async () => await bob.Main(cts.Token), cts.Token)
         };
         Task.WaitAll(tasks, cts.Token); ;
     }
