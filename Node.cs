@@ -431,7 +431,7 @@ internal partial class Node
                 try
                 {
                     var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint, payload, Logger);
-                    var envelope = peer.PrepareEnvelope(directed.ToByteArray(), Logger);
+                    var envelope = peer.PrepareEnvelope(directed, Logger);
                     await peer.GetStream().WriteAsync(envelope.ToByteArray(), cancellationToken);
                 }
                 catch (Exception ex)

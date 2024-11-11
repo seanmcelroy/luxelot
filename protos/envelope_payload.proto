@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+import "directed_message.proto";
+
+option csharp_namespace = "Luxelot.Messages";
+
+message EnvelopePayload {
+    oneof paylod {
+        string error_message = 1;
+        DirectedMessage directed_message = 2;
+    }
+}   

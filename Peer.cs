@@ -23,7 +23,7 @@ internal class Peer : IDisposable
     public byte[]? SessionSharedKey { get; private set; }
     public DateTimeOffset LastActivity { get; set; } = DateTimeOffset.Now;
     private TcpClient Client { get; init; }
-    public ulong BytesReceived { get; private set;} = 0;
+    public ulong BytesReceived { get; private set; } = 0;
 
     public EndPoint? LocalEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client.Client.LocalEndPoint;
     public EndPoint? RemoteEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client.Client.RemoteEndPoint;
@@ -291,13 +291,26 @@ internal class Peer : IDisposable
             return false;
         }
 
-        // TODO For now assume this is a directed message.  Future we need a wrapper message using proto 3 OneOf
-        DirectedMessage directedMessage = DirectedMessage.Parser.ParseFrom(envelope_plain_text, 0, envelope_plain_text.Length);
+        EnvelopePayload envelopePayload;
+        try
+        {
+            envelopePayload = EnvelopePayload.Parser.ParseFrom(envelope_plain_text, 0, envelope_plain_text.Length);
+        }
+        catch (InvalidProtocolBufferException ex)
+        {
+            logger.LogError(ex, "Invalid EnvelopePayload from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+            Client.Close();
+            return false;
+        }
 
-
-
-        logger.LogCritical($"From {PeerId} ({RemoteEndPoint}): {Encoding.UTF8.GetString(directedMessage.Payload.ToByteArray())}");
-        return true;
+        if (envelopePayload.DirectedMessage != null)
+        {
+            logger.LogCritical($"From {PeerId} ({RemoteEndPoint}): {Encoding.UTF8.GetString(envelopePayload.DirectedMessage.Payload.ToByteArray())}");
+            return true;
+        }
+        
+        logger.LogError("Unsupported envelope payload received from {PeerId} ({RemoteEndPoint}. Closing.", PeerId, RemoteEndPoint);
+        return false;
     }
 
     public void Close() => Client.Close();
@@ -320,7 +333,21 @@ internal class Peer : IDisposable
         disposed = true;
     }
 
-    public Envelope PrepareEnvelope(byte[] payload, ILogger logger) {
+    public Envelope PrepareEnvelope(DirectedMessage directedMessage, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(directedMessage, nameof(directedMessage));
+
+        var envelope_payload = new EnvelopePayload
+        {
+            DirectedMessage = directedMessage
+        };
+
+        var envelope_payload_bytes = envelope_payload.ToByteArray();
+        return PrepareEnvelope(envelope_payload_bytes, logger);
+    }
+
+    private Envelope PrepareEnvelope(byte[] payload, ILogger logger)
+    {
         byte[] nonce = new byte[12];
         byte[] plain_text = payload;
         byte[] cipher_text = new byte[plain_text.Length];
