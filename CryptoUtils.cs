@@ -1,22 +1,41 @@
 using System.Text;
-using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Kyber;
 using Org.BouncyCastle.Security;
+
+namespace Luxelot;
 
 public static class CryptoUtils
 {
     private static Mutex mutex = new();
     private readonly static SecureRandom SecureRandom = new();
 
-    // Super helpful: https://stackoverflow.com/questions/75240825/implementing-crystals-kyber-using-bouncycastle-java
+    // Kyber - Super helpful: https://stackoverflow.com/questions/75240825/implementing-crystals-kyber-using-bouncycastle-java
+    // Dilithium - Super helpful: https://asecuritysite.com/bouncy/bc_dil
+
+    public static AsymmetricCipherKeyPair GenerateDilithiumKeyPair()
+    {
+        // These keys are used for NODE IDENTITY.  The node can sign envelopes forwarded
+        // by other nodes around the network.
+
+        DilithiumKeyGenerationParameters keyGenParameters = new(SecureRandom, DilithiumParameters.Dilithium5);
+        DilithiumKeyPairGenerator keyPairGen = new();
+        keyPairGen.Init(keyGenParameters);
+        var keyPair = keyPairGen.GenerateKeyPair();
+        return keyPair;
+    }
 
     public static AsymmetricCipherKeyPair GenerateKyberKeyPair()
     {
+        // These keys are used for PEER ENCRYPTION.  A shared key is established using
+        // the Kyber KEM process, and these are not ferried around the network.
+
         AsymmetricCipherKeyPair key_pair;
 
         var okay = mutex.WaitOne(10000);
-        if (!okay) {
+        if (!okay)
+        {
             throw new InvalidOperationException();
         }
         try
@@ -68,7 +87,7 @@ public static class CryptoUtils
         return key_bytes;
     }
 
-    public static string BytesToHex(byte[] bytes)
+    public static string BytesToHex(IEnumerable<byte> bytes)
     {
         StringBuilder result = new();
         foreach (byte b in bytes)

@@ -4,5 +4,6 @@ option csharp_namespace = "Luxelot.Messages";
 
 message Syn {
     uint32 prot_ver = 1;
-    bytes pub_key = 2;
+    bytes session_pub_key = 2;
+    bytes id_pub_key = 3;
 }

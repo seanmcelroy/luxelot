@@ -5,4 +5,5 @@ option csharp_namespace = "Luxelot.Messages";
 message Ack {
     uint32 prot_ver = 1;
     bytes cipher_text = 2;
+    bytes id_pub_key = 3;
 }

@@ -24,12 +24,13 @@ namespace Luxelot.Messages {
     static AckReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "CglhY2sucHJvdG8iLAoDQWNrEhAKCHByb3RfdmVyGAEgASgNEhMKC2NpcGhl",
-            "cl90ZXh0GAIgASgMQhOqAhBMdXhlbG90Lk1lc3NhZ2VzYgZwcm90bzM="));
+            "CglhY2sucHJvdG8iQAoDQWNrEhAKCHByb3RfdmVyGAEgASgNEhMKC2NpcGhl",
+            "cl90ZXh0GAIgASgMEhIKCmlkX3B1Yl9rZXkYAyABKAxCE6oCEEx1eGVsb3Qu",
+            "TWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.Ack), global::Luxelot.Messages.Ack.Parser, new[]{ "ProtVer", "CipherText" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.Ack), global::Luxelot.Messages.Ack.Parser, new[]{ "ProtVer", "CipherText", "IdPubKey" }, null, null, null, null)
           }));
     }
     #endregion
@@ -72,6 +73,7 @@ namespace Luxelot.Messages {
     public Ack(Ack other) : this() {
       protVer_ = other.protVer_;
       cipherText_ = other.cipherText_;
+      idPubKey_ = other.idPubKey_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -105,6 +107,18 @@ namespace Luxelot.Messages {
       }
     }
 
+    /// <summary>Field number for the "id_pub_key" field.</summary>
+    public const int IdPubKeyFieldNumber = 3;
+    private pb::ByteString idPubKey_ = pb::ByteString.Empty;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public pb::ByteString IdPubKey {
+      get { return idPubKey_; }
+      set {
+        idPubKey_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -122,6 +136,7 @@ namespace Luxelot.Messages {
       }
       if (ProtVer != other.ProtVer) return false;
       if (CipherText != other.CipherText) return false;
+      if (IdPubKey != other.IdPubKey) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -131,6 +146,7 @@ namespace Luxelot.Messages {
       int hash = 1;
       if (ProtVer != 0) hash ^= ProtVer.GetHashCode();
       if (CipherText.Length != 0) hash ^= CipherText.GetHashCode();
+      if (IdPubKey.Length != 0) hash ^= IdPubKey.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -157,6 +173,10 @@ namespace Luxelot.Messages {
         output.WriteRawTag(18);
         output.WriteBytes(CipherText);
       }
+      if (IdPubKey.Length != 0) {
+        output.WriteRawTag(26);
+        output.WriteBytes(IdPubKey);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -175,6 +195,10 @@ namespace Luxelot.Messages {
         output.WriteRawTag(18);
         output.WriteBytes(CipherText);
       }
+      if (IdPubKey.Length != 0) {
+        output.WriteRawTag(26);
+        output.WriteBytes(IdPubKey);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -190,6 +214,9 @@ namespace Luxelot.Messages {
       }
       if (CipherText.Length != 0) {
         size += 1 + pb::CodedOutputStream.ComputeBytesSize(CipherText);
+      }
+      if (IdPubKey.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeBytesSize(IdPubKey);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -208,6 +235,9 @@ namespace Luxelot.Messages {
       }
       if (other.CipherText.Length != 0) {
         CipherText = other.CipherText;
+      }
+      if (other.IdPubKey.Length != 0) {
+        IdPubKey = other.IdPubKey;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -232,6 +262,10 @@ namespace Luxelot.Messages {
             CipherText = input.ReadBytes();
             break;
           }
+          case 26: {
+            IdPubKey = input.ReadBytes();
+            break;
+          }
         }
       }
     #endif
@@ -253,6 +287,10 @@ namespace Luxelot.Messages {
           }
           case 18: {
             CipherText = input.ReadBytes();
+            break;
+          }
+          case 26: {
+            IdPubKey = input.ReadBytes();
             break;
           }
         }

@@ -4,161 +4,87 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Google.Protobuf;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Pqc.Crypto.Crystals.Kyber;
+using Org.BouncyCastle.Pqc.Asn1;
+using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 
-internal class Node
+namespace Luxelot;
+
+internal partial class Node
 {
     public const uint PROTOCOL_VERSION = 1;
 
-
     private readonly string Name;
     private readonly ILogger Logger;
-    public required int Port { get; init; }
+    public required int PeerPort { get; init; }
+    public required int UserPort { get; init; }
     public IPEndPoint[]? Phonebook { get; init; }
 
     private readonly ConcurrentDictionary<TaskEntry, Task> Tasks = [];
-    private readonly ConcurrentDictionary<PeerEntry, TcpClient> Peers = [];
+    private readonly ConcurrentDictionary<Guid, Peer> Peers = [];
+    private TcpClient? User;
+    private readonly Mutex UserMutex = new();
+    private readonly AsymmetricCipherKeyPair IdentityKeys;
+
+    public byte[] IdentityKeyPublicBytes { get => ((DilithiumPublicKeyParameters)IdentityKeys.Public).GetEncoded(); }
 
     public Node(string name, ILoggerFactory loggerFactory)
     {
         Name = name;
         Logger = loggerFactory.CreateLogger($"Node {Name}");
+
+        Logger.LogInformation("Generating node identity keys");
+        IdentityKeys = CryptoUtils.GenerateDilithiumKeyPair();
+        Logger.LogTrace("Node {NodeName} public identity key: {IdentityPublicKey}", Name, CryptoUtils.BytesToHex(IdentityKeyPublicBytes));
     }
 
-    public async Task Main(CancellationToken cancellationToken)
+    public void Main(CancellationToken cancellationToken)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        Logger.LogInformation("Setting up peer listener loop");
-        var peer_listener_task = Task.Run(async () =>
+        Logger.LogInformation("Setting up user listener loop");
         {
-            try
-            {
-                using TcpListener peer_listener = new(IPAddress.Any, Port);
-                peer_listener.Start();
-                Logger.LogInformation($"Listening for peers at {peer_listener.LocalEndpoint}");
-                while (!cts.IsCancellationRequested)
-                {
-                    var peer = await peer_listener.AcceptTcpClientAsync(cancellationToken);
-                    using (Logger.BeginScope($"New Peer {peer.Client?.RemoteEndPoint}"))
-                    {
-                        Logger.LogDebug($"New peer connection from {peer.Client?.RemoteEndPoint}");
-                        var (publicKeyBytes, privateKeyBytes) = GenerateKeysForPeer();
+            var user_listener_task = Task.Run(async () => await UserListenerTask(cts.Token), cancellationToken);
+            var user_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            Tasks.TryAdd(user_listener_task_entry, user_listener_task);
+            Logger.LogInformation("User listener loop is a persistent background worker task {TaskId}", user_listener_task_entry.TaskId);
+        }
 
-                        var peerEntry = new PeerEntry
-                        {
-                            RemoteEndpoint = peer.Client?.RemoteEndPoint!,
-                            PublicKey = publicKeyBytes,
-                            PrivateKey = privateKeyBytes,
-                            SharedKey = null, // Established after Ack
-                        };
-                        Peers.TryAdd(peerEntry, peer);
-                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ProcessSyn(peerEntry, peer, cancellationToken)));
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Exception in peer listener loop");
-                throw;
-            }
-        }, cancellationToken);
-        var peer_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
-        Tasks.TryAdd(peer_listener_task_entry, peer_listener_task);
-        Logger.LogInformation($"Peer listener loop is a persistent background worker TaskId={peer_listener_task_entry.TaskId}");
+        Logger.LogInformation("Setting up peer listener loop");
+        {
+            var peer_listener_task = Task.Run(async () => await PeerListenerTask(cts.Token), cancellationToken);
+            var peer_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            Tasks.TryAdd(peer_listener_task_entry, peer_listener_task);
+            Logger.LogInformation("Peer listener loop is a persistent background worker task {TaskId}", peer_listener_task_entry.TaskId);
+        }
 
         Logger.LogInformation("Setting up peer janitor loop");
-        var peer_janitor_task = Task.Run(() =>
         {
-            try
-            {
-                while (!cts.IsCancellationRequested)
-                {
-                    Thread.Sleep(60000); // Janitor runs once per minute.
-                    foreach ((PeerEntry peerEntry, TcpClient peer) in Peers)
-                    {
-                        var peer_tcp_info = IPGlobalProperties.GetIPGlobalProperties()
-                                .GetActiveTcpConnections()
-                                .SingleOrDefault(x => x.LocalEndPoint.Equals(peer.Client?.LocalEndPoint)
-                                                    && x.RemoteEndPoint.Equals(peer.Client?.RemoteEndPoint)
-                                );
-                        var peer_state = peer_tcp_info != null ? peer_tcp_info.State : TcpState.Unknown;
-                        if (peer_state != TcpState.Established || !peer.Client.Connected || !peer.GetStream().CanWrite)
-                            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peerEntry, peer), cancellationToken));
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Exception in peer listener loop");
-                throw;
-            }
-        }, cancellationToken);
-        var peer_janitor_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
-        Tasks.TryAdd(peer_janitor_task_entry, peer_janitor_task);
-        Logger.LogInformation($"Peer janitor loop is a persistent background worker TaskId={peer_janitor_task_entry.TaskId}");
+            var peer_janitor_task = Task.Run(() => PeerJanitorTask(cts.Token), cancellationToken);
+            var peer_janitor_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            Tasks.TryAdd(peer_janitor_task_entry, peer_janitor_task);
+            Logger.LogInformation("Peer janitor loop is a persistent background worker task {TaskId}", peer_janitor_task_entry.TaskId);
+        }
 
-        Logger.LogInformation("Setting up dialer loop");
-        var dialer_task = Task.Run(async () =>
+        Logger.LogInformation("Setting up peer dialer loop");
         {
-            while (Phonebook == null || Phonebook.Length == 0)
-            {
-                // Sleep for one hour.
-                Logger.LogDebug("No entries in the phone book; dialer sleeping for one hour.");
-                Thread.Sleep(60 * 60000);
-            }
+            var peer_dialer_task = Task.Run(() => PeerDialerTask(cts.Token), cancellationToken);
+            var dialer_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            Tasks.TryAdd(dialer_task_entry, peer_dialer_task);
+            Logger.LogInformation("Dialer loop is a persistent background worker task {TaskId}", dialer_task_entry.TaskId);
+        }
 
-            try
-            {
-                Thread.Sleep(5000); // Dialer starts after 5 seconds.
-                do
-                {
-                    foreach (var endpoint in Phonebook)
-                    {
-                        TcpClient peer = new();
-                        await peer.ConnectAsync(endpoint, cancellationToken);
-
-                        var (publicKeyBytes, privateKeyBytes) = GenerateKeysForPeer();
-
-                        var peerEntry = new PeerEntry
-                        {
-                            RemoteEndpoint = peer.Client.RemoteEndPoint!,
-                            PublicKey = publicKeyBytes,
-                            PrivateKey = privateKeyBytes,
-                            SharedKey = null, // Established after Ack
-                        };
-                        Peers.TryAdd(peerEntry, peer);
-                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(peerEntry, peer, cancellationToken), cancellationToken));
-                    }
-
-                    foreach ((PeerEntry peerEntry, TcpClient peer) in Peers)
-                    {
-                        var peer_tcp_info = IPGlobalProperties.GetIPGlobalProperties()
-                                .GetActiveTcpConnections()
-                                .SingleOrDefault(x => x.LocalEndPoint.Equals(peer.Client?.LocalEndPoint)
-                                                    && x.RemoteEndPoint.Equals(peer.Client?.RemoteEndPoint)
-                                );
-                        var peer_state = peer_tcp_info != null ? peer_tcp_info.State : TcpState.Unknown;
-                        if (peer_state != TcpState.Established || !peer.Client.Connected || !peer.GetStream().CanWrite)
-                            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peerEntry, peer), cancellationToken));
-                    }
-                    Thread.Sleep(5 * 60000); // Dialer then runs every 5 minutes.
-                } while (!cts.IsCancellationRequested);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Exception in dialer loop");
-                throw;
-            }
-        }, cancellationToken);
-        var dialer_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
-        Tasks.TryAdd(dialer_task_entry, dialer_task);
-        Logger.LogInformation($"Dialer loop is a persistent background worker TaskId={dialer_task_entry.TaskId}");
-
+        Logger.LogInformation("Setting up peer connected input handler loop");
+        {
+            var peer_handler_task = Task.Run(() => PeerHandleInputTask(cts.Token), cancellationToken);
+            var peer_handler_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            Tasks.TryAdd(peer_handler_task_entry, peer_handler_task);
+            Logger.LogInformation("Peer input handler loop is a persistent background worker task {TaskId}", peer_handler_task_entry.TaskId);
+        }
 
         while (!cts.IsCancellationRequested)
         {
@@ -186,7 +112,7 @@ internal class Node
                             }
                         default:
                             {
-                                Logger.LogError($"Persistent background worker is not alive TaskId={t.Key.TaskId}");
+                                Logger.LogError("Persistent background worker is not alive task {TaskId}", t.Key.TaskId);
                                 throw new Exception();
                             }
                     }
@@ -210,77 +136,226 @@ internal class Node
                         {
                             if (Tasks.TryRemove(t))
                             {
-                                Logger.LogDebug($"Removed completed task {t.Key.TaskId}");
+                                Logger.LogDebug("Removed completed task {TaskId}", t.Key.TaskId);
                                 taskQueueSkip = taskIndex;
                                 goto task_walk_again;
                             }
                             else
                             {
-                                // logger.LogError($"Cannot remove completed task {t.Key.TaskId}!");
+                                // logger.LogError("Cannot remove completed task {TaskId}!", t.Key.TaskId);
                             }
 
                             break;
                         }
                 }
-
             }
+        }
+    }
+
+    #region Tasks
+    private async Task UserListenerTask(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using TcpListener user_listener = new(IPAddress.Loopback, UserPort);
+            user_listener.Start();
+            Logger.LogInformation("Listening for local user commands at {LocalEndpoint}", user_listener.LocalEndpoint);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var user = await user_listener.AcceptTcpClientAsync(cancellationToken);
+                using (Logger.BeginScope($"User Connection {user.Client?.RemoteEndPoint}"))
+                {
+                    Logger.LogDebug("New user connection from {RemoteEndPoint}", user.Client?.RemoteEndPoint);
+
+                    var okay = UserMutex.WaitOne(5000); // Wait at most 5 seconds
+                    if (!okay)
+                    {
+                        Logger.LogError("Unable to obtain mutex to accept user connection.");
+                        continue;
+                    }
+
+                    try
+                    {
+                        if (User != null)
+                        {
+                            Logger.LogWarning($"A user connection already exists from {User.Client?.RemoteEndPoint}. Shutting that one down to use this new one from {user.Client?.RemoteEndPoint}");
+                            try
+                            {
+                                await User.GetStream().WriteAsync(Encoding.UTF8.GetBytes($"\r\nUSER CONNECTING FROM {user.Client?.RemoteEndPoint}\r\nGOODBYE.\r\n"), cancellationToken);
+                            }
+                            catch (Exception ex)
+                            {
+                                // Swallow exception..
+                                Logger.LogTrace(ex, "Unable to send goodbye to replaced user connection");
+                            }
+                            User.Close();
+                            User.Dispose();
+                            User = null;
+                        }
+
+                        User = user;
+                    }
+                    finally
+                    {
+                        UserMutex.ReleaseMutex();
+                    }
+
+                    // User input handler loop
+                    await User.GetStream().WriteAsync(Encoding.UTF8.GetBytes($"\r\nHELLO.\r\n"), cancellationToken);
+
+                    var user_okay = true;
+                    while (!cancellationToken.IsCancellationRequested && user_okay)
+                    {
+                        var buffer = new byte[1024]; // 1 kb
+                        int size = 0;
+                        try
+                        {
+                            size = await User.GetStream().ReadAsync(buffer, cancellationToken: cancellationToken);
+                        }
+                        catch (EndOfStreamException ex)
+                        {
+                            Logger.LogWarning(ex, "End of stream from user {RemoteEndPoint} could be processed. Closing.", User.Client?.RemoteEndPoint);
+                            User.Close();
+                            user_okay = false;
+                            continue;
+                        }
+
+                        var input = Encoding.UTF8.GetString(buffer, 0, size);
+                        await HandleUserInput(input);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception in peer listener loop");
+            throw;
+        }
+    }
+    private async Task PeerListenerTask(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using TcpListener peer_listener = new(IPAddress.Any, PeerPort);
+            peer_listener.Start();
+            Logger.LogInformation("Listening for peers at {LocalEndpoint}", peer_listener.LocalEndpoint);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var peerTcpClient = await peer_listener.AcceptTcpClientAsync(cancellationToken);
+                using (Logger.BeginScope("New Peer {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint))
+                {
+                    Logger.LogDebug("New peer connection from {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint);
+                    var peer = Peer.CreatePeerFromAccept(peerTcpClient, Logger);
+                    var added = Peers.TryAdd(peer.PeerId, peer);
+                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
+                    {
+                        var shutdown = !await peer.HandleSyn(IdentityKeyPublicBytes, Logger, cancellationToken);
+                        if (shutdown)
+                            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                    }, cancellationToken));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception in peer listener loop");
+            throw;
+        }
+    }
+    private void PeerJanitorTask(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                Thread.Sleep(60000); // Janitor runs once per minute.
+
+                var activeConnections = IPGlobalProperties.GetIPGlobalProperties()
+                    .GetActiveTcpConnections();
+
+                foreach (var peer in Peers.Values)
+                {
+                    var peer_tcp_info = activeConnections
+                            .SingleOrDefault(x => x.LocalEndPoint.Equals(peer.LocalEndPoint)
+                                                && x.RemoteEndPoint.Equals(peer.RemoteEndPoint)
+                            );
+                    var peer_state = peer_tcp_info != null ? peer_tcp_info.State : TcpState.Unknown;
+                    if (peer_state != TcpState.Established || !peer.IsWriteable)
+                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception in peer janitor loop");
+            throw;
+        }
+    }
+    private async Task PeerDialerTask(CancellationToken cancellationToken)
+    {
+        while (Phonebook == null || Phonebook.Length == 0)
+        {
+            // Sleep for one hour.
+            Logger.LogDebug("No entries in the phone book; dialer sleeping for one hour.");
+            Thread.Sleep(60 * 60000);
+        }
+
+        try
+        {
+            Thread.Sleep(5000); // Dialer starts after 5 seconds.
+            do
+            {
+                foreach (var endpoint in Phonebook)
+                {
+                    TcpClient peerTcpClient = new();
+                    await peerTcpClient.ConnectAsync(endpoint, cancellationToken);
+                    var peer = Peer.CreatePeerToConnect(peerTcpClient, Logger);
+                    var added = Peers.TryAdd(peer.PeerId!, peer);
+                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(peer, cancellationToken), cancellationToken));
+                }
+
+                foreach (var peer in Peers.Values)
+                {
+                    var peer_tcp_info = IPGlobalProperties.GetIPGlobalProperties()
+                            .GetActiveTcpConnections()
+                            .SingleOrDefault(x => x.LocalEndPoint.Equals(peer.LocalEndPoint)
+                                                && x.RemoteEndPoint.Equals(peer.RemoteEndPoint)
+                            );
+                    var peer_state = peer_tcp_info != null ? peer_tcp_info.State : TcpState.Unknown;
+                    if (peer_state != TcpState.Established || !peer.IsWriteable)
+                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                }
+                Thread.Sleep(5 * 60000); // Dialer then runs every 5 minutes.
+            } while (!cancellationToken.IsCancellationRequested);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception in dialer loop");
+            throw;
+        }
+    }
+
+    private async Task PeerHandleInputTask(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (Thread.Yield())
+                Thread.Sleep(200);
 
             // Peer walk
-            foreach (var p in Peers)
+            foreach (var peer in Peers.Values)
             {
-                if (p.Key.SharedKey != null && p.Value.Available > 0) // Fully established with data to read.
+                var shutdown = !await peer.HandleInputAsync(Logger, cancellationToken);
+                if (shutdown)
                 {
-                    var buffer = new byte[16 * 1024];
-                    int size = 0;
-                    try
-                    {
-                        size = await p.Value.GetStream().ReadAsync(buffer, cancellationToken: cancellationToken);
-                    }
-                    catch (EndOfStreamException ex)
-                    {
-                        Logger.LogWarning(ex, $"End of stream from {p.Value.Client?.RemoteEndPoint} could be processed. Closing.");
-                        p.Value.Close();
-                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(p.Key, p.Value), cancellationToken));
-                        return;
-                    }
-
-                    Envelope envelope;
-                    try
-                    {
-                        envelope = Envelope.Parser.ParseFrom(buffer, 0, size);
-                    }
-                    catch (InvalidProtocolBufferException ex)
-                    {
-                        Logger.LogError(ex, $"Invalid {nameof(Envelope)} from {p.Value.Client?.RemoteEndPoint} could not be parsed. Closing.");
-                        p.Value.Close();
-                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(p.Key, p.Value), cancellationToken));
-                        return;
-                    }
-
-                    // Decrypt envelope contents.
-                    byte[] nonce = envelope.Nonce.ToByteArray();
-                    byte[] cipher_text = envelope.Ciphertext.ToByteArray();
-                    byte[] plain_text = new byte[cipher_text.Length];
-                    byte[] tag = envelope.Tag.ToByteArray();
-                    byte[] associated_data = envelope.AssociatedData.ToByteArray();
-                    try
-                    {
-                        using ChaCha20Poly1305 cha = new(p.Key.SharedKey);
-                        cha.Decrypt(nonce, cipher_text, tag, plain_text, associated_data);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError(ex, $"Failed to decrypt message; closing down connection to victim {p.Value.Client?.RemoteEndPoint}.");
-                        p.Value.Close();
-                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(p.Key, p.Value), cancellationToken));
-                        return;
-                    }
-
-                    Logger.LogCritical($"From {p.Value.Client.RemoteEndPoint}: {Encoding.UTF8.GetString(plain_text)}");
+                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                    continue;
                 }
             }
         }
     }
+
+    #endregion
 
 
     private (byte[] publicKeyBytes, byte[] privateKeyBytes) GenerateKeysForPeer()
@@ -321,9 +396,9 @@ internal class Node
             //    + $"Decryption key length: {decryptionKey.Length} key: {CryptoUtils.BytesToHex(decryptionKey)}"
             //    + $"Decryption key is equal to encryption key: {keysAreEqual}");
 
-            Logger.LogTrace($"Generated private key length: {privateKeyBytes.Length}");
+            Logger.LogTrace("Generated private key length: {PrivateKeyByteLength}", privateKeyBytes.Length);
             publicKeyBytes = CryptoUtils.GetChrystalsKyberPublicKeyFromEncoded(node_key);
-            Logger.LogTrace($"Generated public key length: {publicKeyBytes.Length}");
+            Logger.LogTrace("Generated public key length: {PublicKeyByteLength}", publicKeyBytes.Length);
 
             Logger.LogDebug("Key pairs successfully generated");
         }
@@ -331,168 +406,132 @@ internal class Node
         return (publicKeyBytes, privateKeyBytes);
     }
 
-    private async Task SendSyn(PeerEntry peerEntry, TcpClient peer, CancellationToken cancellationToken)
+    private async Task SendSyn(Peer peer, CancellationToken cancellationToken)
     {
-        if (peer.Connected)
+        if (peer.IsWriteable)
         {
             var stream = peer.GetStream();
-            if (stream.CanWrite)
+            Logger.LogDebug("Sending Syn to peer {PeerId} ({RemoteEndPoint})", peer.PeerId, peer.RemoteEndPoint);
+            var message = new Syn
             {
-                Logger.LogDebug($"Sending Syn to peer {peer.Client?.RemoteEndPoint}");
-                var message = new Syn
+                ProtVer = PROTOCOL_VERSION,
+                SessionPubKey = ByteString.CopyFrom(peer.SessionPublicKey),
+                IdPubKey = ByteString.CopyFrom(IdentityKeyPublicBytes)
+            };
+            await stream.WriteAsync(message.ToByteArray(), cancellationToken);
+            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
+            {
+                var shutdown = !await peer.HandleAck(Logger, cancellationToken);
+                if (shutdown)
+                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+
+                // Okay, we made it!
+                Logger.LogDebug("Sending test message to peer {PeerId} ({RemoteEndPoint})", peer.PeerId, peer.RemoteEndPoint);
+                byte[] payload = Encoding.UTF8.GetBytes("WE DID IT!");
+                try
                 {
-                    ProtVer = PROTOCOL_VERSION,
-                    PubKey = ByteString.CopyFrom(peerEntry.PublicKey),
-                };
-                await stream.WriteAsync(message.ToByteArray(), cancellationToken);
-                Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ProcessAck(peerEntry, peer, cancellationToken), cancellationToken));
-            }
+                    var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint, payload, Logger);
+                    var envelope = peer.PrepareEnvelope(directed.ToByteArray(), Logger);
+                    await peer.GetStream().WriteAsync(envelope.ToByteArray(), cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerId} ({RemoteEndPoint}).", peer.PeerId, peer.RemoteEndPoint);
+                    peer.Close();
+                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                }
+
+            }, cancellationToken));
         }
     }
 
-    private async Task ProcessSyn(PeerEntry peerEntry, TcpClient peer, CancellationToken cancellationToken)
+    private async Task HandleUserInput(string input)
     {
-        // We expect a Syn (with a public key).  Calculate the Kyber cipher text and send back an Ack.
-        if (!peer.Connected)
+        input = input.Trim(' ', '\r', '\n');
+        if (input.Length == 0)
             return;
 
-        var stream = peer.GetStream();
-        if (!stream.CanRead || !stream.CanWrite)
-            return;
+        //Logger.LogTrace($"USER INPUT: '{input}'");
+        var words = QuotedWordArrayRegex().Split(input).Where(s => s.Length > 0).ToArray();
+        var command = words.First();
+        var stream = User.GetStream();
 
-        var buffer = new byte[2048];
-        int size = 0;
-        try
+        switch (command.ToLowerInvariant())
         {
-            size = await stream.ReadAtLeastAsync(buffer, 1573, cancellationToken: cancellationToken);
+            case "?":
+            case "help":
+                var cmds = new string[] { "node", "peers", "ping" };
+                var cmd_string = cmds.Aggregate((c, n) => $"{c}\r\n{n}");
+                await stream.WriteAsync(Encoding.UTF8.GetBytes($"{cmd_string}\r\n"));
+                break;
+            case "node":
+                await stream.WriteAsync(Encoding.UTF8.GetBytes($"ID Public Key: {CryptoUtils.BytesToHex(IdentityKeyPublicBytes.Take(10))}\r\n"));
+                break;
+            case "peers":
+                await stream.WriteAsync(Encoding.UTF8.GetBytes("Peer List\r\n"));
+                await stream.WriteAsync(Encoding.UTF8.GetBytes("PeerId RemoteEndPoint BytesReceived PeerIDKeyFingerprint\r\n"));
+                foreach (var peer in Peers.Values)
+                {
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"{peer.PeerId} {peer.RemoteEndPoint} {peer.BytesReceived}(r) {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}\r\n"));
+                }
+                await stream.WriteAsync(Encoding.UTF8.GetBytes("End of Peer List\r\n"));
+                break;
+
+            case "ping":
+                if (words.Length != 2)
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"PING command requires one argument, the PeerId to direct the ping.\r\n"));
+                else if (!Guid.TryParse(words[1], out Guid destPeerId))
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"Arg 1 is not a GUID.\r\n"));
+                else
+                {
+                    var peer_to_ping = Peers.Values.SingleOrDefault(p => p.PeerId.Equals(destPeerId));
+                    if (peer_to_ping == null)
+                        await stream.WriteAsync(Encoding.UTF8.GetBytes($"No peer found with GUID {destPeerId}.\r\n"));
+                    else
+                    {
+                        var ping = new Messages.Ping
+                        {
+                            Identifier = 1,
+                            Sequence = 1,
+                            Payload = null
+                        };
+                    }
+                }
+                break;
+
+            case "shutdown":
+                Environment.Exit(0);
+                break;
         }
-        catch (EndOfStreamException ex)
-        {
-            Logger.LogWarning(ex, $"End of stream from {peer.Client?.RemoteEndPoint} before {nameof(Syn)} could be processed. Closing.");
-            peer.Close();
-            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peerEntry, peer), cancellationToken));
-            return;
-        }
 
-        Syn syn;
-        try
-        {
-            syn = Syn.Parser.ParseFrom(buffer, 0, size);
-        }
-        catch (InvalidProtocolBufferException ex)
-        {
-            Logger.LogError(ex, $"Invalid {nameof(Syn)} from {peer.Client?.RemoteEndPoint} could not be parsed. Closing.");
-            peer.Close();
-            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peerEntry, peer), cancellationToken));
-            return;
-        }
-
-        using var scope = Logger.BeginScope($"Process {nameof(Syn)} from {peer.Client?.RemoteEndPoint}");
-        KyberPublicKeyParameters peer_public = new(KyberParameters.kyber1024, syn.PubKey.ToByteArray());
-        var secretKeyWithEncapsulationSender = CryptoUtils.GenerateChrystalsKyberEncryptionKey(peer_public);
-
-        // Shared Key
-        var encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
-        peerEntry.SharedKey = encryptionKey;
-        //Logger.LogCritical($"Key for {peer.Client?.RemoteEndPoint}: {CryptoUtils.BytesToHex(peerEntry.SharedKey)}");
-
-        // Cipher text
-        var encapsulatedKey = secretKeyWithEncapsulationSender.GetEncapsulation();
-
-        Logger.LogDebug($"Sending Ack to peer {peer.Client?.RemoteEndPoint}");
-        var message = new Ack
-        {
-            ProtVer = PROTOCOL_VERSION,
-            CipherText = ByteString.CopyFrom(encapsulatedKey),
-        };
-
-        await stream.WriteAsync(message.ToByteArray(), cancellationToken);
     }
 
-    private async Task ProcessAck(PeerEntry peerEntry, TcpClient peer, CancellationToken cancellationToken)
+    private void ShutdownPeer(Peer peer)
     {
-        // We expect a Syn (with a cipher text).  Calculate the shared key and send back an encrypted SynAck.
-        if (!peer.Connected)
-            return;
-
-        var stream = peer.GetStream();
-        if (!stream.CanRead || !stream.CanWrite)
-            return;
-
-        var buffer = new byte[2048];
-        int size = 0;
-        try
-        {
-            size = await stream.ReadAtLeastAsync(buffer, 1573, cancellationToken: cancellationToken);
-        }
-        catch (EndOfStreamException ex)
-        {
-            Logger.LogWarning(ex, $"End of stream from {peer.Client?.RemoteEndPoint} before {nameof(Ack)} could be processed. Closing.");
-            peer.Close();
-            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peerEntry, peer), cancellationToken));
-            return;
-        }
-
-        Ack ack;
-        try
-        {
-            ack = Ack.Parser.ParseFrom(buffer, 0, size);
-        }
-        catch (InvalidProtocolBufferException ex)
-        {
-            Logger.LogError(ex, $"Invalid {nameof(Ack)} from {peer.Client?.RemoteEndPoint} could not be parsed. Closing.");
-            peer.Close();
-            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peerEntry, peer), cancellationToken));
-            return;
-        }
-
-        using var scope = Logger.BeginScope($"Process {nameof(Ack)} from {peer.Client?.RemoteEndPoint}");
-
-        var privateKeyBytes = peerEntry.PrivateKey;
-        var encapsulatedKey = ack.CipherText.ToByteArray();
-
-        // Shared Key
-        var decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey);
-        peerEntry.SharedKey = decryptionKey;
-        //Logger.LogCritical($"Key for {peer.Client?.RemoteEndPoint}: {CryptoUtils.BytesToHex(peerEntry.SharedKey)}");
-
-        Logger.LogDebug($"Sending Envelope to peer {peer.Client?.RemoteEndPoint}");
-
-        byte[] nonce = new byte[12];
-        byte[] plain_text = Encoding.UTF8.GetBytes("WE DID IT!");
-        byte[] cipher_text = new byte[plain_text.Length];
-        byte[] tag = new byte[16];
-        byte[] associated_data = [];
-        try
-        {
-            using ChaCha20Poly1305 cha = new(peerEntry.SharedKey);
-            RandomNumberGenerator.Fill(nonce);
-            cha.Encrypt(nonce, plain_text, cipher_text, tag, associated_data);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, $"Failed to encrypt message; closing down connection to victim {peer.Client?.RemoteEndPoint}.");
-            peer.Close();
-            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peerEntry, peer), cancellationToken));
-            return;
-        }
-
-        var message = new Envelope
-        {
-            Nonce = ByteString.CopyFrom(nonce),
-            Ciphertext = ByteString.CopyFrom(cipher_text),
-            Tag = ByteString.CopyFrom(tag),
-            AssociatedData = ByteString.CopyFrom(associated_data)
-        };
-
-        await stream.WriteAsync(message.ToByteArray(), cancellationToken);
-    }
-
-    private void ShutdownPeer(PeerEntry peerEntry, TcpClient peer)
-    {
-        if (Peers.TryRemove(new KeyValuePair<PeerEntry, TcpClient>(peerEntry, peer)))
-            Logger.LogDebug($"Removed dead peer {peer.Client?.RemoteEndPoint}");
+        if (Peers.TryRemove(new KeyValuePair<Guid, Peer>(peer.PeerId, peer)))
+            Logger.LogDebug("Removed dead peer {PeerId} RemoteEndPoint {RemoteEndPoint}", peer.PeerId, peer.RemoteEndPoint);
         else
-            Logger.LogError($"Dead peer {peer.Client?.RemoteEndPoint}!");
+            Logger.LogError("Dead peer {PeerId} RemoteEndPoint {RemoteEndPoint}!", peer.PeerId, peer.RemoteEndPoint);
     }
+
+    public DirectedMessage PrepareDirectedMessage(byte[] destinationIdPubKeyThumbprint, byte[] payload, ILogger logger)
+    {
+        var nodeIdPrivateKey = (DilithiumPrivateKeyParameters)IdentityKeys.Private;
+        var nodeSigner = new DilithiumSigner();
+        nodeSigner.Init(true, nodeIdPrivateKey);
+        var signature = nodeSigner.GenerateSignature(payload);
+
+        return new DirectedMessage
+        {
+            // The source is my own node.
+            SrcIdentityPublicKeyThumbprint = ByteString.CopyFrom(SHA256.HashData(IdentityKeyPublicBytes)),
+            // The desitnation is some other node I know by its thumbprint.
+            DstIdentityPublicKeyThumbprint = ByteString.CopyFrom(destinationIdPubKeyThumbprint),
+            Payload = ByteString.CopyFrom(payload),
+            Signature = ByteString.CopyFrom(signature),
+        };
+    }
+
+    [GeneratedRegex("(?:^|\\s)(\\\"(?:[^\\\"])*\\\"|[^\\s]*)")]
+    private static partial Regex QuotedWordArrayRegex();
 }
