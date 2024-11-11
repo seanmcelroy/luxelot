@@ -1,4 +1,5 @@
-using System.Dynamic;
+using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -7,6 +8,8 @@ using Google.Protobuf;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Paddings;
+using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Kyber;
 
 namespace Luxelot;
@@ -37,6 +40,8 @@ internal class Peer : IDisposable
 
     internal static Peer CreatePeerFromAccept(TcpClient tcpClient, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(tcpClient);
+
         var peer = new Peer(tcpClient)
         {
             SessionPublicKey = null,
@@ -48,6 +53,8 @@ internal class Peer : IDisposable
 
     internal static Peer CreatePeerToConnect(TcpClient tcpClient, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(tcpClient);
+
         var (publicKeyBytes, privateKeyBytes) = GenerateKeysForPeer(logger);
         var peer = new Peer(tcpClient)
         {
@@ -60,6 +67,8 @@ internal class Peer : IDisposable
 
     private byte[] ComputeSharedKeyFromSynAndGetCipherText(byte[] publicKey)
     {
+        ArgumentNullException.ThrowIfNull(publicKey);
+
         if (SessionSharedKey != null)
             throw new InvalidOperationException("Shared key already computed!");
 
@@ -76,6 +85,8 @@ internal class Peer : IDisposable
 
     private void ComputeSharedKeyFromAckCipherText(byte[] encapsulatedKey)
     {
+        ArgumentNullException.ThrowIfNull(encapsulatedKey);
+
         if (SessionSharedKey != null)
             throw new InvalidOperationException("Shared key already computed!");
         if (SessionPrivateKey == null)
@@ -136,8 +147,10 @@ internal class Peer : IDisposable
 
     internal NetworkStream GetStream() => Client.GetStream();
 
-    internal async Task<bool> HandleSyn(byte[] nodeIdentityKeyPublicBytes, ILogger logger, CancellationToken cancellationToken)
+    internal async Task<bool> HandleSyn(ImmutableArray<byte> nodeIdentityKeyPublicBytes, ILogger logger, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(nodeIdentityKeyPublicBytes);
+
         // We expect a Syn (with a public key).  Calculate the Kyber cipher text and send back an Ack.
         var stream = Client.GetStream();
         if (!stream.CanRead || !stream.CanWrite)
@@ -173,7 +186,12 @@ internal class Peer : IDisposable
         var encapsulatedKey = ComputeSharedKeyFromSynAndGetCipherText(syn.SessionPubKey.ToByteArray());
 
         // This peer's identity key was received in Syn.
+        if (IdentityPublicKey != null)
+            throw new InvalidOperationException($"Peer {PeerId} should have an empty identity public key field at Syn time!");
+
         IdentityPublicKey = syn.IdPubKey.ToByteArray();
+
+        logger.LogDebug("ID Key for {PeerId} ({RemoteEndPoint}) is thumbprint {Thumbprint}", PeerId, RemoteEndPoint, CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint));
 
         //Logger.LogCritical($"Key for {PeerId} ({peer.RemoteEndPoint}): {CryptoUtils.BytesToHex(peer.SharedKey!)}");
 
@@ -183,7 +201,7 @@ internal class Peer : IDisposable
             ProtVer = Node.PROTOCOL_VERSION,
             CipherText = ByteString.CopyFrom(encapsulatedKey),
             // Now provide our own identity key in the response Ack
-            IdPubKey = ByteString.CopyFrom(nodeIdentityKeyPublicBytes),
+            IdPubKey = ByteString.CopyFrom(nodeIdentityKeyPublicBytes.ToArray()),
         };
 
         await stream.WriteAsync(message.ToByteArray(), cancellationToken);
@@ -220,6 +238,19 @@ internal class Peer : IDisposable
         try
         {
             ack = Ack.Parser.ParseFrom(buffer, 0, size);
+            if (ack.CipherText == null || ack.CipherText.Length != 1568)
+            {
+                logger.LogError("Invalid Ack (CipherText) from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+                Client.Close();
+                return false;
+            }
+            if (ack.IdPubKey == null || ack.IdPubKey.Length != 2592)
+            {
+                logger.LogError("Invalid Ack (IdPubKey) from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+                Client.Close();
+                return false;
+            }
+
         }
         catch (InvalidProtocolBufferException ex)
         {
@@ -231,13 +262,18 @@ internal class Peer : IDisposable
         using var scope = logger.BeginScope("Process Ack from {RemoteEndPoint}", RemoteEndPoint);
 
         ComputeSharedKeyFromAckCipherText(ack.CipherText.ToByteArray());
+        if (IdentityPublicKey != null)
+            throw new InvalidOperationException($"Peer {PeerId} should have an empty identity public key field at Ack time!");
         IdentityPublicKey = ack.IdPubKey.ToByteArray();
 
         //Logger.LogCritical($"Key for {PeerId} ({RemoteEndPoint}): {CryptoUtils.BytesToHex(peer.SharedKey!)}");
         return true;
     }
 
-    internal async Task<bool> HandleInputAsync(ILogger logger, CancellationToken cancellationToken)
+    internal async Task<bool> HandleInputAsync(
+        ConcurrentDictionary<string, byte[]> thumbnailSignatureCache,
+        ILogger logger,
+        CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(disposed, Client);
 
@@ -305,10 +341,34 @@ internal class Peer : IDisposable
 
         if (envelopePayload.DirectedMessage != null)
         {
-            logger.LogCritical($"From {PeerId} ({RemoteEndPoint}): {Encoding.UTF8.GetString(envelopePayload.DirectedMessage.Payload.ToByteArray())}");
+            var dm = envelopePayload.DirectedMessage;
+            // Is this destined for me?
+            if (Enumerable.SequenceEqual(IdentityPublicKeyThumbprint, dm.DstIdentityPublicKeyThumbprint))
+            {
+                logger.LogTrace("Discarding message intended for node thumbprint {Thumbprint1}.  I have thumbprint {Thumbprint2}.", CryptoUtils.BytesToHex(dm.DstIdentityPublicKeyThumbprint), CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint));
+                // TODO: Implement routing to other node, if possible.
+                return true;
+            }
+
+            // Is the signature valid?
+            if (!thumbnailSignatureCache.TryGetValue(CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint), out byte[]? sourceIdentityPublicKey))
+            {
+                logger.LogError("Discarding message with unverifiable signature for unknown thumbprint {Thumbprint}.", CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint));
+                return false;
+            }
+            var sourceVerify = new DilithiumSigner();
+            DilithiumPublicKeyParameters parms = new(DilithiumParameters.Dilithium5, sourceIdentityPublicKey);
+            sourceVerify.Init(false, parms);
+            var dm_payload = dm.Payload.ToByteArray();
+            if (!sourceVerify.VerifySignature(dm_payload, dm.Signature.ToByteArray())) {
+                logger.LogError("Discarding message with invalid signature for known thumbprint {Thumbprint}.", CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint));
+                return false;
+            }
+
+            logger.LogCritical("From {PeerId} ({RemoteEndPoint}): {Contents}", PeerId, RemoteEndPoint, Encoding.UTF8.GetString(dm.Payload.ToByteArray()));
             return true;
         }
-        
+
         logger.LogError("Unsupported envelope payload received from {PeerId} ({RemoteEndPoint}. Closing.", PeerId, RemoteEndPoint);
         return false;
     }
@@ -348,6 +408,8 @@ internal class Peer : IDisposable
 
     private Envelope PrepareEnvelope(byte[] payload, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(payload);
+
         byte[] nonce = new byte[12];
         byte[] plain_text = payload;
         byte[] cipher_text = new byte[plain_text.Length];

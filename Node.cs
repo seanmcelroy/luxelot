@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -9,7 +10,6 @@ using Google.Protobuf;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Pqc.Asn1;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 
 namespace Luxelot;
@@ -26,20 +26,28 @@ internal partial class Node
 
     private readonly ConcurrentDictionary<TaskEntry, Task> Tasks = [];
     private readonly ConcurrentDictionary<Guid, Peer> Peers = [];
+    private readonly ConcurrentDictionary<string, byte[]> ThumbnailSignatureCache = [];
     private TcpClient? User;
     private readonly Mutex UserMutex = new();
     private readonly AsymmetricCipherKeyPair IdentityKeys;
-
-    public byte[] IdentityKeyPublicBytes { get => ((DilithiumPublicKeyParameters)IdentityKeys.Public).GetEncoded(); }
+    public readonly ImmutableArray<byte> IdentityKeyPublicBytes;
+    public readonly ImmutableArray<byte> IdentityKeyPublicThumbprint;
 
     public Node(string name, ILoggerFactory loggerFactory)
     {
+        ArgumentNullException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+
         Name = name;
         Logger = loggerFactory.CreateLogger($"Node {Name}");
 
         Logger.LogInformation("Generating node identity keys");
         IdentityKeys = CryptoUtils.GenerateDilithiumKeyPair();
-        Logger.LogTrace("Node {NodeName} public identity key: {IdentityPublicKey}", Name, CryptoUtils.BytesToHex(IdentityKeyPublicBytes));
+        var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)IdentityKeys.Public).GetEncoded();
+        IdentityKeyPublicBytes = identityKeysPublicBytes.ToImmutableArray();
+        IdentityKeyPublicThumbprint = SHA256.HashData(identityKeysPublicBytes).ToImmutableArray();
+
+        Logger.LogTrace("Node {NodeName} public identity key thumbprint: {Thumbprint}", Name, CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint));
     }
 
     public void Main(CancellationToken cancellationToken)
@@ -51,7 +59,7 @@ internal partial class Node
             var user_listener_task = Task.Run(async () => await UserListenerTask(cts.Token), cancellationToken);
             var user_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(user_listener_task_entry, user_listener_task);
-            Logger.LogInformation("User listener loop is a persistent background worker task {TaskId}", user_listener_task_entry.TaskId);
+            Logger.LogTrace("User listener loop is a persistent background worker task {TaskId}", user_listener_task_entry.TaskId);
         }
 
         Logger.LogInformation("Setting up peer listener loop");
@@ -59,7 +67,7 @@ internal partial class Node
             var peer_listener_task = Task.Run(async () => await PeerListenerTask(cts.Token), cancellationToken);
             var peer_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_listener_task_entry, peer_listener_task);
-            Logger.LogInformation("Peer listener loop is a persistent background worker task {TaskId}", peer_listener_task_entry.TaskId);
+            Logger.LogTrace("Peer listener loop is a persistent background worker task {TaskId}", peer_listener_task_entry.TaskId);
         }
 
         Logger.LogInformation("Setting up peer janitor loop");
@@ -67,7 +75,7 @@ internal partial class Node
             var peer_janitor_task = Task.Run(() => PeerJanitorTask(cts.Token), cancellationToken);
             var peer_janitor_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_janitor_task_entry, peer_janitor_task);
-            Logger.LogInformation("Peer janitor loop is a persistent background worker task {TaskId}", peer_janitor_task_entry.TaskId);
+            Logger.LogTrace("Peer janitor loop is a persistent background worker task {TaskId}", peer_janitor_task_entry.TaskId);
         }
 
         Logger.LogInformation("Setting up peer dialer loop");
@@ -75,7 +83,7 @@ internal partial class Node
             var peer_dialer_task = Task.Run(() => PeerDialerTask(cts.Token), cancellationToken);
             var dialer_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(dialer_task_entry, peer_dialer_task);
-            Logger.LogInformation("Dialer loop is a persistent background worker task {TaskId}", dialer_task_entry.TaskId);
+            Logger.LogTrace("Dialer loop is a persistent background worker task {TaskId}", dialer_task_entry.TaskId);
         }
 
         Logger.LogInformation("Setting up peer connected input handler loop");
@@ -83,7 +91,7 @@ internal partial class Node
             var peer_handler_task = Task.Run(() => PeerHandleInputTask(cts.Token), cancellationToken);
             var peer_handler_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_handler_task_entry, peer_handler_task);
-            Logger.LogInformation("Peer input handler loop is a persistent background worker task {TaskId}", peer_handler_task_entry.TaskId);
+            Logger.LogTrace("Peer input handler loop is a persistent background worker task {TaskId}", peer_handler_task_entry.TaskId);
         }
 
         while (!cts.IsCancellationRequested)
@@ -136,7 +144,7 @@ internal partial class Node
                         {
                             if (Tasks.TryRemove(t))
                             {
-                                Logger.LogDebug("Removed completed task {TaskId}", t.Key.TaskId);
+                                Logger.LogTrace("Removed completed task {TaskId}", t.Key.TaskId);
                                 taskQueueSkip = taskIndex;
                                 goto task_walk_again;
                             }
@@ -252,6 +260,15 @@ internal partial class Node
                         var shutdown = !await peer.HandleSyn(IdentityKeyPublicBytes, Logger, cancellationToken);
                         if (shutdown)
                             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                        else if (peer.IdentityPublicKeyThumbprint == null
+                            || peer.IdentityPublicKey == null)
+                        {
+                            Logger.LogError("Identity public key malformed or not initialized after Syn handled.");
+                            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                        }
+                        else
+                            ThumbnailSignatureCache.TryAdd(CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey);
+
                     }, cancellationToken));
                 }
             }
@@ -345,7 +362,7 @@ internal partial class Node
             // Peer walk
             foreach (var peer in Peers.Values)
             {
-                var shutdown = !await peer.HandleInputAsync(Logger, cancellationToken);
+                var shutdown = !await peer.HandleInputAsync(ThumbnailSignatureCache, Logger, cancellationToken);
                 if (shutdown)
                 {
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
@@ -357,55 +374,6 @@ internal partial class Node
 
     #endregion
 
-
-    private (byte[] publicKeyBytes, byte[] privateKeyBytes) GenerateKeysForPeer()
-    {
-        //byte[] encryptionKey, encapsulatedKey, decryptionKey;
-        byte[] publicKeyBytes, privateKeyBytes;
-
-        using (Logger.BeginScope($"Crypto setup"))
-        {
-            // Generate Kyber crypto material for our comms with this peer.
-            Logger.LogInformation("Generating cryptographic key material");
-            AsymmetricCipherKeyPair node_key;
-            try
-            {
-                node_key = CryptoUtils.GenerateKyberKeyPair();
-                Logger.LogDebug("Geneated Kyber key pair!");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Unable to generate Kyber key pair");
-                throw;
-            }
-
-            // Generate the encryption key and the encapsulated key
-            //var secretKeyWithEncapsulationSender = CryptoUtils.GenerateChrystalsKyberEncryptionKey((KyberPublicKeyParameters)node_key.Public);
-            //encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
-            //encapsulatedKey = secretKeyWithEncapsulationSender.GetEncapsulation();
-
-            //logger.LogInformation("Encryption side: generate the encryption key and the encapsulated key\r\n"
-            //+ $"Encryption key length: {encryptionKey.Length} key: {CryptoUtils.BytesToHex(encryptionKey)}\r\n"
-            //+ $"Encapsulated key length: {encapsulatedKey.Length} key: {CryptoUtils.BytesToHex(encapsulatedKey)}");
-
-            privateKeyBytes = CryptoUtils.GetChrystalsKyberPrivateKeyFromEncoded(node_key);
-            //decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey);
-            //var keysAreEqual = Enumerable.SequenceEqual(encryptionKey, decryptionKey);
-
-            //logger.LogInformation("Decryption side: receive the encapsulated key and generate the decryption key\r\n"
-            //    + $"Decryption key length: {decryptionKey.Length} key: {CryptoUtils.BytesToHex(decryptionKey)}"
-            //    + $"Decryption key is equal to encryption key: {keysAreEqual}");
-
-            Logger.LogTrace("Generated private key length: {PrivateKeyByteLength}", privateKeyBytes.Length);
-            publicKeyBytes = CryptoUtils.GetChrystalsKyberPublicKeyFromEncoded(node_key);
-            Logger.LogTrace("Generated public key length: {PublicKeyByteLength}", publicKeyBytes.Length);
-
-            Logger.LogDebug("Key pairs successfully generated");
-        }
-
-        return (publicKeyBytes, privateKeyBytes);
-    }
-
     private async Task SendSyn(Peer peer, CancellationToken cancellationToken)
     {
         if (peer.IsWriteable)
@@ -416,29 +384,41 @@ internal partial class Node
             {
                 ProtVer = PROTOCOL_VERSION,
                 SessionPubKey = ByteString.CopyFrom(peer.SessionPublicKey),
-                IdPubKey = ByteString.CopyFrom(IdentityKeyPublicBytes)
+                IdPubKey = ByteString.CopyFrom([.. IdentityKeyPublicBytes])
             };
             await stream.WriteAsync(message.ToByteArray(), cancellationToken);
             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
             {
                 var shutdown = !await peer.HandleAck(Logger, cancellationToken);
                 if (shutdown)
-                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
-
-                // Okay, we made it!
-                Logger.LogDebug("Sending test message to peer {PeerId} ({RemoteEndPoint})", peer.PeerId, peer.RemoteEndPoint);
-                byte[] payload = Encoding.UTF8.GetBytes("WE DID IT!");
-                try
                 {
-                    var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint, payload, Logger);
-                    var envelope = peer.PrepareEnvelope(directed, Logger);
-                    await peer.GetStream().WriteAsync(envelope.ToByteArray(), cancellationToken);
+                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                 }
-                catch (Exception ex)
+                else if (peer.IdentityPublicKeyThumbprint == null
+                    || peer.IdentityPublicKey == null)
                 {
-                    Logger.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerId} ({RemoteEndPoint}).", peer.PeerId, peer.RemoteEndPoint);
-                    peer.Close();
+                    Logger.LogError("Identity public key malformed or not initialized after Ack handled.");
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                }
+                else
+                {
+                    ThumbnailSignatureCache.TryAdd(CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey);
+
+                    // Okay, we made it!
+                    Logger.LogDebug("Sending test message to peer {PeerId} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.PeerId, peer.RemoteEndPoint, CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
+                    byte[] payload = Encoding.UTF8.GetBytes("WE DID IT!");
+                    try
+                    {
+                        var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint!, payload, Logger);
+                        var envelope = peer.PrepareEnvelope(directed, Logger);
+                        await peer.GetStream().WriteAsync(envelope.ToByteArray(), cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerId} ({RemoteEndPoint}).", peer.PeerId, peer.RemoteEndPoint);
+                        peer.Close();
+                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                    }
                 }
 
             }, cancellationToken));
@@ -508,6 +488,8 @@ internal partial class Node
 
     private void ShutdownPeer(Peer peer)
     {
+        ArgumentNullException.ThrowIfNull(peer);
+
         if (Peers.TryRemove(new KeyValuePair<Guid, Peer>(peer.PeerId, peer)))
             Logger.LogDebug("Removed dead peer {PeerId} RemoteEndPoint {RemoteEndPoint}", peer.PeerId, peer.RemoteEndPoint);
         else
@@ -516,20 +498,28 @@ internal partial class Node
 
     public DirectedMessage PrepareDirectedMessage(byte[] destinationIdPubKeyThumbprint, byte[] payload, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
+        ArgumentNullException.ThrowIfNull(payload);
+
+        if (Enumerable.SequenceEqual(destinationIdPubKeyThumbprint, IdentityKeyPublicThumbprint))
+            throw new ArgumentException("Attempted to prepare direct messages to my own node", nameof(destinationIdPubKeyThumbprint));
+
         var nodeIdPrivateKey = (DilithiumPrivateKeyParameters)IdentityKeys.Private;
         var nodeSigner = new DilithiumSigner();
         nodeSigner.Init(true, nodeIdPrivateKey);
         var signature = nodeSigner.GenerateSignature(payload);
 
-        return new DirectedMessage
+        var dm = new DirectedMessage
         {
             // The source is my own node.
-            SrcIdentityPublicKeyThumbprint = ByteString.CopyFrom(SHA256.HashData(IdentityKeyPublicBytes)),
+            SrcIdentityPublicKeyThumbprint = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]),
             // The desitnation is some other node I know by its thumbprint.
             DstIdentityPublicKeyThumbprint = ByteString.CopyFrom(destinationIdPubKeyThumbprint),
             Payload = ByteString.CopyFrom(payload),
             Signature = ByteString.CopyFrom(signature),
         };
+
+        return dm;
     }
 
     [GeneratedRegex("(?:^|\\s)(\\\"(?:[^\\\"])*\\\"|[^\\s]*)")]

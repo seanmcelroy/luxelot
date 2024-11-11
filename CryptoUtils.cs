@@ -8,7 +8,7 @@ namespace Luxelot;
 
 public static class CryptoUtils
 {
-    private static Mutex mutex = new();
+    private static readonly Mutex mutex = new();
     private readonly static SecureRandom SecureRandom = new();
 
     // Kyber - Super helpful: https://stackoverflow.com/questions/75240825/implementing-crystals-kyber-using-bouncycastle-java
@@ -55,6 +55,8 @@ public static class CryptoUtils
 
     public static byte[] GetChrystalsKyberPublicKeyFromEncoded(AsymmetricCipherKeyPair keyPair)
     {
+        ArgumentNullException.ThrowIfNull(keyPair);
+
         var publicKey = (KyberPublicKeyParameters)keyPair.Public;
         var publicKeyBytes = publicKey.GetEncoded();
         return publicKeyBytes;
@@ -62,6 +64,8 @@ public static class CryptoUtils
 
     public static byte[] GetChrystalsKyberPrivateKeyFromEncoded(AsymmetricCipherKeyPair keyPair)
     {
+        ArgumentNullException.ThrowIfNull(keyPair);
+
         var privateKey = (KyberPrivateKeyParameters)keyPair.Private;
         var privateKeyBytes = privateKey.GetEncoded();
         return privateKeyBytes;
@@ -69,6 +73,8 @@ public static class CryptoUtils
 
     public static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(KyberPublicKeyParameters publicKey)
     {
+        ArgumentNullException.ThrowIfNull(publicKey);
+
         KyberKemGenerator kem_generator = new(SecureRandom);
         var secret_with_encapsulation = kem_generator.GenerateEncapsulated(publicKey);
         return secret_with_encapsulation;
@@ -76,19 +82,28 @@ public static class CryptoUtils
 
     public static byte[] GenerateChrystalsKyberDecryptionKey(byte[] privateKeyBytes, byte[] encapsulatedKey)
     {
+        ArgumentNullException.ThrowIfNull(privateKeyBytes);
+        ArgumentNullException.ThrowIfNull(encapsulatedKey);
+
         var privateKey = new KyberPrivateKeyParameters(KyberParameters.kyber1024, privateKeyBytes);
         return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey);
     }
 
     public static byte[] GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, byte[] encapsulatedKey)
     {
+        ArgumentNullException.ThrowIfNull(privateKey);
+        ArgumentNullException.ThrowIfNull(encapsulatedKey);
+
         KyberKemExtractor extractor = new KyberKemExtractor(privateKey);
         var key_bytes = extractor.ExtractSecret(encapsulatedKey);
         return key_bytes;
     }
 
-    public static string BytesToHex(IEnumerable<byte> bytes)
+    public static string BytesToHex(IEnumerable<byte>? bytes)
     {
+        if (bytes == null)
+            return string.Empty;
+
         StringBuilder result = new();
         foreach (byte b in bytes)
             _ = result.Append(Convert.ToString((b & 0xff) + 0x100, 16)[1..]);
