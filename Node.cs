@@ -19,59 +19,71 @@ internal partial class Node
 {
     public const uint PROTOCOL_VERSION = 1;
 
-    private readonly string Name;
     private readonly ILogger Logger;
     public required int PeerPort { get; init; }
     public required int UserPort { get; init; }
     public IPEndPoint[]? Phonebook { get; init; }
 
     private readonly ConcurrentDictionary<TaskEntry, Task> Tasks = [];
-    private readonly ConcurrentDictionary<Guid, Peer> Peers = [];
-    private readonly ConcurrentDictionary<string, byte[]> ThumbnailSignatureCache = [];
+    private readonly ConcurrentDictionary<EndPoint, Peer> Peers = [];
+    private readonly ConcurrentDictionary<string, ImmutableArray<byte>> ThumbnailSignatureCache = [];
     private TcpClient? User;
     private readonly Mutex UserMutex = new();
     private readonly AsymmetricCipherKeyPair IdentityKeys;
     public readonly ImmutableArray<byte> IdentityKeyPublicBytes;
     public readonly ImmutableArray<byte> IdentityKeyPublicThumbprint;
+    public string Name { get; init; }
+    public string ShortName { get; init; }
 
-    public Node(string name, ILoggerFactory loggerFactory)
+    public Node(ILoggerFactory loggerFactory, string? shortName)
     {
-        ArgumentNullException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
-        Name = name;
-        Logger = loggerFactory.CreateLogger($"Node {Name}");
-
-        Logger.LogInformation("Generating node identity keys");
         IdentityKeys = CryptoUtils.GenerateDilithiumKeyPair();
         var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)IdentityKeys.Public).GetEncoded();
-        IdentityKeyPublicBytes = identityKeysPublicBytes.ToImmutableArray();
-        IdentityKeyPublicThumbprint = SHA256.HashData(identityKeysPublicBytes).ToImmutableArray();
+        IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
+        IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
+        Name = CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint);
+        if (string.IsNullOrWhiteSpace(shortName)) {
+            ShortName = $"{Name[..8]}...";
+            Logger = loggerFactory.CreateLogger($"Node {ShortName}");
+        }
+        else {
+            ShortName = shortName;
+            Logger = loggerFactory.CreateLogger($"Node {shortName}({Name[..8]}...)");
+        }
 
-        Logger.LogTrace("Node {NodeName} public identity key thumbprint: {Thumbprint}", Name, CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint));
+        Logger.LogInformation("Generated node identity key with thumbprint {Thumbprint}", Name);
     }
 
     public void Main(CancellationToken cancellationToken)
     {
+        var nodeContext = new NodeContext
+        {
+            NodeShortName = ShortName,
+            NodeIdentityKeyPublicBytes = IdentityKeyPublicBytes,
+            Logger = Logger,
+        };
+
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        Logger.LogInformation("Setting up user listener loop");
+        Logger.LogTrace("Setting up user listener loop");
         {
-            var user_listener_task = Task.Run(async () => await UserListenerTask(cts.Token), cancellationToken);
+            var user_listener_task = Task.Run(async () => await UserListenerTask(nodeContext, cts.Token), cancellationToken);
             var user_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(user_listener_task_entry, user_listener_task);
             Logger.LogTrace("User listener loop is a persistent background worker task {TaskId}", user_listener_task_entry.TaskId);
         }
 
-        Logger.LogInformation("Setting up peer listener loop");
+        Logger.LogTrace("Setting up peer listener loop");
         {
-            var peer_listener_task = Task.Run(async () => await PeerListenerTask(cts.Token), cancellationToken);
+            var peer_listener_task = Task.Run(async () => await PeerListenerTask(nodeContext, cts.Token), cancellationToken);
             var peer_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_listener_task_entry, peer_listener_task);
             Logger.LogTrace("Peer listener loop is a persistent background worker task {TaskId}", peer_listener_task_entry.TaskId);
         }
 
-        Logger.LogInformation("Setting up peer janitor loop");
+        Logger.LogTrace("Setting up peer janitor loop");
         {
             var peer_janitor_task = Task.Run(() => PeerJanitorTask(cts.Token), cancellationToken);
             var peer_janitor_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
@@ -79,15 +91,15 @@ internal partial class Node
             Logger.LogTrace("Peer janitor loop is a persistent background worker task {TaskId}", peer_janitor_task_entry.TaskId);
         }
 
-        Logger.LogInformation("Setting up peer dialer loop");
+        Logger.LogTrace("Setting up peer dialer loop");
         {
-            var peer_dialer_task = Task.Run(() => PeerDialerTask(cts.Token), cancellationToken);
+            var peer_dialer_task = Task.Run(() => PeerDialerTask(nodeContext, cts.Token), cancellationToken);
             var dialer_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(dialer_task_entry, peer_dialer_task);
             Logger.LogTrace("Dialer loop is a persistent background worker task {TaskId}", dialer_task_entry.TaskId);
         }
 
-        Logger.LogInformation("Setting up peer connected input handler loop");
+        Logger.LogTrace("Setting up peer connected input handler loop");
         {
             var peer_handler_task = Task.Run(() => PeerHandleInputTask(cts.Token), cancellationToken);
             var peer_handler_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
@@ -162,7 +174,7 @@ internal partial class Node
     }
 
     #region Tasks
-    private async Task UserListenerTask(CancellationToken cancellationToken)
+    private async Task UserListenerTask(NodeContext context, CancellationToken cancellationToken)
     {
         try
         {
@@ -230,7 +242,7 @@ internal partial class Node
                         }
 
                         var input = Encoding.UTF8.GetString(buffer, 0, size);
-                        await HandleUserInput(input, cancellationToken);
+                        await HandleUserInput(context, input, cancellationToken);
                     }
                 }
             }
@@ -241,7 +253,7 @@ internal partial class Node
             throw;
         }
     }
-    private async Task PeerListenerTask(CancellationToken cancellationToken)
+    private async Task PeerListenerTask(NodeContext context, CancellationToken cancellationToken)
     {
         try
         {
@@ -255,10 +267,10 @@ internal partial class Node
                 {
                     Logger.LogDebug("New peer connection from {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint);
                     var peer = Peer.CreatePeerFromAccept(peerTcpClient, Logger);
-                    var added = Peers.TryAdd(peer.PeerId, peer);
+                    var added = Peers.TryAdd(peer.RemoteEndPoint!, peer);
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
                     {
-                        var shutdown = !await peer.HandleSyn(IdentityKeyPublicBytes, Logger, cancellationToken);
+                        var shutdown = !await peer.HandleSyn(context, cancellationToken);
                         if (shutdown)
                             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                         else if (peer.IdentityPublicKeyThumbprint == null
@@ -268,7 +280,7 @@ internal partial class Node
                             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                         }
                         else
-                            ThumbnailSignatureCache.TryAdd(CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey);
+                            ThumbnailSignatureCache.TryAdd(CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
 
                     }, cancellationToken));
                 }
@@ -309,7 +321,7 @@ internal partial class Node
             throw;
         }
     }
-    private async Task PeerDialerTask(CancellationToken cancellationToken)
+    private async Task PeerDialerTask(NodeContext context, CancellationToken cancellationToken)
     {
         while (Phonebook == null || Phonebook.Length == 0)
         {
@@ -328,8 +340,8 @@ internal partial class Node
                     TcpClient peerTcpClient = new();
                     await peerTcpClient.ConnectAsync(endpoint, cancellationToken);
                     var peer = Peer.CreatePeerToConnect(peerTcpClient, Logger);
-                    var added = Peers.TryAdd(peer.PeerId!, peer);
-                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(peer, cancellationToken), cancellationToken));
+                    var added = Peers.TryAdd(peer.RemoteEndPoint!, peer);
+                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(context, peer, cancellationToken), cancellationToken));
                 }
 
                 foreach (var peer in Peers.Values)
@@ -375,16 +387,16 @@ internal partial class Node
 
     #endregion
 
-    private async Task SendSyn(Peer peer, CancellationToken cancellationToken)
+    private async Task SendSyn(NodeContext context, Peer peer, CancellationToken cancellationToken)
     {
         if (peer.IsWriteable)
         {
-            Logger.LogDebug("Sending Syn to peer {PeerId} ({RemoteEndPoint})", peer.PeerId, peer.RemoteEndPoint);
-            await peer.SendSyn(IdentityKeyPublicBytes, cancellationToken);
+            Logger.LogDebug("Sending Syn to peer {LocalEndPoint}->{RemoteEndPoint}", peer.LocalEndPoint, peer.RemoteEndPoint);
+            await peer.SendSyn(context, cancellationToken);
 
             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
             {
-                var shutdown = !await peer.HandleAck(Logger, cancellationToken);
+                var shutdown = !await peer.HandleAck(context, cancellationToken);
                 if (shutdown)
                 {
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
@@ -397,23 +409,24 @@ internal partial class Node
                 }
                 else
                 {
-                    ThumbnailSignatureCache.TryAdd(CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey);
+                    ThumbnailSignatureCache.TryAdd(CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
 
                     // Okay, we made it!
-                    Logger.LogDebug("Sending test message to peer {PeerId} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.PeerId, peer.RemoteEndPoint, CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
+                    Logger.LogDebug("Sending test message to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.PeerShortName, peer.RemoteEndPoint, CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
 
-                    var payload = new ConsoleAlert {
+                    var payload = new ConsoleAlert
+                    {
                         Message = "WE DID IT!"
                     };
                     try
                     {
-                        var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint!, payload, Logger);
-                        var envelope = peer.PrepareEnvelope(directed, Logger);
+                        var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint.Value, payload, Logger);
+                        var envelope = peer.PrepareEnvelope(context, directed);
                         await peer.SendEnvelope(envelope, cancellationToken);
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerId} ({RemoteEndPoint}).", peer.PeerId, peer.RemoteEndPoint);
+                        Logger.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", peer.PeerShortName, peer.RemoteEndPoint);
                         peer.Close();
                         Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                     }
@@ -423,7 +436,7 @@ internal partial class Node
         }
     }
 
-    private async Task HandleUserInput(string input, CancellationToken cancellationToken)
+    private async Task HandleUserInput(NodeContext context, string input, CancellationToken cancellationToken)
     {
         input = input.Trim(' ', '\r', '\n');
         if (input.Length == 0)
@@ -440,31 +453,29 @@ internal partial class Node
             case "help":
                 var cmds = new string[] { "node", "peers", "ping" };
                 var cmd_string = cmds.Aggregate((c, n) => $"{c}\r\n{n}");
-                await stream.WriteAsync(Encoding.UTF8.GetBytes($"{cmd_string}\r\n"));
+                await stream.WriteAsync(Encoding.UTF8.GetBytes($"{cmd_string}\r\n"), cancellationToken);
                 break;
             case "node":
-                await stream.WriteAsync(Encoding.UTF8.GetBytes($"ID Public Key: {CryptoUtils.BytesToHex(IdentityKeyPublicBytes.Take(10))}\r\n"));
+                await stream.WriteAsync(Encoding.UTF8.GetBytes($"ID Public Key: {CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint)}\r\n"), cancellationToken);
                 break;
             case "peers":
-                await stream.WriteAsync(Encoding.UTF8.GetBytes("Peer List\r\n"));
-                await stream.WriteAsync(Encoding.UTF8.GetBytes("PeerId RemoteEndPoint BytesReceived PeerIDKeyFingerprint\r\n"));
+                await stream.WriteAsync(Encoding.UTF8.GetBytes("Peer List\r\n"), cancellationToken);
+                await stream.WriteAsync(Encoding.UTF8.GetBytes("PeerShortName RemoteEndPoint BytesReceived IdPubKeyThumbprint\r\n"), cancellationToken);
                 foreach (var peer in Peers.Values)
                 {
-                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"{peer.PeerId} {peer.RemoteEndPoint} {peer.BytesReceived}(r) {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}\r\n"));
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"{peer.PeerShortName} {peer.RemoteEndPoint} {peer.BytesReceived}(r) {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}\r\n"), cancellationToken);
                 }
-                await stream.WriteAsync(Encoding.UTF8.GetBytes("End of Peer List\r\n"));
+                await stream.WriteAsync(Encoding.UTF8.GetBytes("End of Peer List\r\n"), cancellationToken);
                 break;
 
             case "ping":
                 if (words.Length != 2)
-                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"PING command requires one argument, the PeerId to direct the ping.\r\n"));
-                else if (!Guid.TryParse(words[1], out Guid destPeerId))
-                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"Arg 1 is not a GUID.\r\n"));
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"PING command requires one argument, the peer name to direct the ping.\r\n"), cancellationToken);
                 else
                 {
-                    var peer_to_ping = Peers.Values.SingleOrDefault(p => p.PeerId.Equals(destPeerId));
+                    var peer_to_ping = Peers.Values.FirstOrDefault(p => p.PeerShortName.Equals(words[1]));
                     if (peer_to_ping == null)
-                        await stream.WriteAsync(Encoding.UTF8.GetBytes($"No peer found with GUID {destPeerId}.\r\n"));
+                        await stream.WriteAsync(Encoding.UTF8.GetBytes($"No peer found with name '{words[1]}'.\r\n"), cancellationToken);
                     else
                     {
                         var ping = new Messages.Ping
@@ -473,8 +484,8 @@ internal partial class Node
                             Sequence = 1,
                             Payload = ByteString.Empty
                         };
-                        var dm = PrepareDirectedMessage(peer_to_ping.IdentityPublicKeyThumbprint, ping, Logger);
-                        var env = peer_to_ping.PrepareEnvelope(dm, Logger);
+                        var dm = PrepareDirectedMessage(peer_to_ping.IdentityPublicKeyThumbprint.Value, ping, Logger);
+                        var env = peer_to_ping.PrepareEnvelope(context, dm);
                         await peer_to_ping.SendEnvelope(env, cancellationToken);
                     }
                 }
@@ -491,13 +502,13 @@ internal partial class Node
     {
         ArgumentNullException.ThrowIfNull(peer);
 
-        if (Peers.TryRemove(new KeyValuePair<Guid, Peer>(peer.PeerId, peer)))
-            Logger.LogDebug("Removed dead peer {PeerId} RemoteEndPoint {RemoteEndPoint}", peer.PeerId, peer.RemoteEndPoint);
+        if (peer.RemoteEndPoint != null && Peers.TryRemove(new KeyValuePair<EndPoint, Peer>(peer.RemoteEndPoint, peer)))
+            Logger.LogDebug("Removed dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}", peer.PeerShortName, peer.RemoteEndPoint);
         else
-            Logger.LogError("Dead peer {PeerId} RemoteEndPoint {RemoteEndPoint}!", peer.PeerId, peer.RemoteEndPoint);
+            Logger.LogError("Dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}!", peer.PeerShortName, peer.RemoteEndPoint);
     }
 
-    public DirectedMessage PrepareDirectedMessage(byte[] destinationIdPubKeyThumbprint, IMessage payload, ILogger logger)
+    public DirectedMessage PrepareDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
         ArgumentNullException.ThrowIfNull(payload);
@@ -516,7 +527,7 @@ internal partial class Node
             // The source is my own node.
             SrcIdentityPublicKeyThumbprint = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]),
             // The desitnation is some other node I know by its thumbprint.
-            DstIdentityPublicKeyThumbprint = ByteString.CopyFrom(destinationIdPubKeyThumbprint),
+            DstIdentityPublicKeyThumbprint = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]),
             Payload = packed_payload,
             Signature = ByteString.CopyFrom(signature),
         };

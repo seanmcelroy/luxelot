@@ -1,8 +1,10 @@
+using System.Collections.Immutable;
 using System.Text;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Kyber;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Utilities;
 
 namespace Luxelot;
 
@@ -75,28 +77,58 @@ public static class CryptoUtils
     {
         ArgumentNullException.ThrowIfNull(publicKey);
 
-        KyberKemGenerator kem_generator = new(SecureRandom);
-        var secret_with_encapsulation = kem_generator.GenerateEncapsulated(publicKey);
+        ISecretWithEncapsulation secret_with_encapsulation;
+
+        var okay = mutex.WaitOne(10000);
+        if (!okay)
+        {
+            throw new InvalidOperationException();
+        }
+        try
+        {
+            KyberKemGenerator kem_generator = new(SecureRandom);
+            secret_with_encapsulation = kem_generator.GenerateEncapsulated(publicKey);
+        }
+        finally
+        {
+            mutex.ReleaseMutex(); // AbsorbBits in GenerateKeyPair() cannot handle threading.
+        }
+
         return secret_with_encapsulation;
     }
 
-    public static byte[] GenerateChrystalsKyberDecryptionKey(byte[] privateKeyBytes, byte[] encapsulatedKey)
+    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey)
     {
         ArgumentNullException.ThrowIfNull(privateKeyBytes);
         ArgumentNullException.ThrowIfNull(encapsulatedKey);
 
-        var privateKey = new KyberPrivateKeyParameters(KyberParameters.kyber1024, privateKeyBytes);
+        var privateKey = new KyberPrivateKeyParameters(KyberParameters.kyber1024, [.. privateKeyBytes]);
         return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey);
     }
 
-    public static byte[] GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, byte[] encapsulatedKey)
+    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte>encapsulatedKey)
     {
         ArgumentNullException.ThrowIfNull(privateKey);
         ArgumentNullException.ThrowIfNull(encapsulatedKey);
 
-        KyberKemExtractor extractor = new KyberKemExtractor(privateKey);
-        var key_bytes = extractor.ExtractSecret(encapsulatedKey);
-        return key_bytes;
+        byte[] key_bytes;
+
+        var okay = mutex.WaitOne(10000);
+        if (!okay)
+        {
+            throw new InvalidOperationException();
+        }
+        try
+        {
+            KyberKemExtractor extractor = new(privateKey);
+            key_bytes = extractor.ExtractSecret([.. encapsulatedKey]);
+        }
+        finally
+        {
+            mutex.ReleaseMutex(); // AbsorbBits in GenerateKeyPair() cannot handle threading.
+        }
+
+        return [.. key_bytes];
     }
 
     public static string BytesToHex(IEnumerable<byte>? bytes)

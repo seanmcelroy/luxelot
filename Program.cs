@@ -18,23 +18,32 @@ internal class Program
 
         CancellationTokenSource cts = new();
 
-        var alice = new Node("Alice", factory)
-        {          
+        var alice = new Node(factory, "Alice")
+        {
             PeerPort = 9000,
             UserPort = 8000,
+            Phonebook = [
+                new IPEndPoint(IPAddress.Loopback, 9001) // Alice calls Bob
+            ]
         };
-        var bob = new Node("Bob", factory)
+        var bob = new Node(factory, "Bob")
         {
             PeerPort = 9001,
             UserPort = 8001,
             Phonebook = [
-                new IPEndPoint(IPAddress.Loopback, 9000)
+                new IPEndPoint(IPAddress.Loopback, 9002) // Bob calls Carol
             ]
+        };
+        var carol = new Node(factory, "Carol")
+        {
+            PeerPort = 9002,
+            UserPort = 8002,
         };
 
         var tasks = new Task[]{
             Task.Run(() => alice.Main(cts.Token), cts.Token),
-            Task.Run(() => bob.Main(cts.Token), cts.Token)
+            Task.Run(() => bob.Main(cts.Token), cts.Token),
+            Task.Run(() => carol.Main(cts.Token), cts.Token)
         };
         Task.WaitAll(tasks, cts.Token); ;
     }

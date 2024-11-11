@@ -9,7 +9,6 @@ using Google.Protobuf.WellKnownTypes;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Paddings;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Kyber;
 
@@ -19,18 +18,19 @@ internal class Peer : IDisposable
 {
     private bool disposed = false;
 
-    public Guid PeerId { get; init; } = Guid.NewGuid();
-    public byte[]? IdentityPublicKey { get; private set; }
-    public byte[]? IdentityPublicKeyThumbprint => IdentityPublicKey == null ? null : SHA256.HashData(IdentityPublicKey);
-    public byte[]? SessionPublicKey { get; init; }
-    private byte[]? SessionPrivateKey { get; init; }
-    public byte[]? SessionSharedKey { get; private set; }
+    public string PeerName { get; private set; } = "<Unset>";
+    public string PeerShortName { get; private set; } = "<Unset>";
+    public ImmutableArray<byte>? IdentityPublicKey { get; private set; }
+    public ImmutableArray<byte>? IdentityPublicKeyThumbprint { get; private set; }
+    public ImmutableArray<byte>? SessionPublicKey { get; init; }
+    private ImmutableArray<byte>? SessionPrivateKey { get; init; }
+    public ImmutableArray<byte>? SessionSharedKey { get; private set; }
     public DateTimeOffset LastActivity { get; set; } = DateTimeOffset.Now;
     private TcpClient Client { get; init; }
     public ulong BytesReceived { get; private set; } = 0;
 
-    public EndPoint? LocalEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client.Client.LocalEndPoint;
-    public EndPoint? RemoteEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client.Client.RemoteEndPoint;
+    public EndPoint? LocalEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client.Client?.LocalEndPoint;
+    public EndPoint? RemoteEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client.Client?.RemoteEndPoint;
     public bool IsReadable => !disposed && Client.Connected && Client.GetStream().CanRead;
     public bool IsWriteable => !disposed && Client.Connected && Client.GetStream().CanWrite;
 
@@ -66,7 +66,7 @@ internal class Peer : IDisposable
         return peer;
     }
 
-    private byte[] ComputeSharedKeyFromSynAndGetCipherText(byte[] publicKey)
+    private byte[] ComputeSessionSharedKeyFromSynAndGetCipherText(byte[] publicKey)
     {
         ArgumentNullException.ThrowIfNull(publicKey);
 
@@ -78,13 +78,13 @@ internal class Peer : IDisposable
 
         // Shared Key
         var encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
-        SessionSharedKey = encryptionKey;
+        SessionSharedKey = encryptionKey.ToImmutableArray();
 
         var encapsulatedKey = secretKeyWithEncapsulationSender.GetEncapsulation();
         return encapsulatedKey;
     }
 
-    private void ComputeSharedKeyFromAckCipherText(byte[] encapsulatedKey)
+    private void ComputeSessionSharedKeyFromAckCipherText(ImmutableArray<byte> encapsulatedKey)
     {
         ArgumentNullException.ThrowIfNull(encapsulatedKey);
 
@@ -94,11 +94,11 @@ internal class Peer : IDisposable
             throw new InvalidOperationException("Private key not set!");
 
         // Shared Key
-        var decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey, encapsulatedKey);
+        var decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, encapsulatedKey);
         SessionSharedKey = decryptionKey;
     }
 
-    private static (byte[] publicKeyBytes, byte[] privateKeyBytes) GenerateKeysForPeer(ILogger logger)
+    private static (ImmutableArray<byte> publicKeyBytes, ImmutableArray<byte> privateKeyBytes) GenerateKeysForPeer(ILogger logger)
     {
         //byte[] encryptionKey, encapsulatedKey, decryptionKey;
         byte[] publicKeyBytes, privateKeyBytes;
@@ -143,14 +143,14 @@ internal class Peer : IDisposable
             logger.LogDebug("Key pairs successfully generated");
         }
 
-        return (publicKeyBytes, privateKeyBytes);
+        return (publicKeyBytes.ToImmutableArray(), privateKeyBytes.ToImmutableArray());
     }
 
     internal NetworkStream GetStream() => Client.GetStream();
 
-    internal async Task<bool> HandleSyn(ImmutableArray<byte> nodeIdentityKeyPublicBytes, ILogger logger, CancellationToken cancellationToken)
+    internal async Task<bool> HandleSyn(NodeContext nodeContext, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(nodeIdentityKeyPublicBytes);
+        ArgumentNullException.ThrowIfNull(nodeContext);
 
         // We expect a Syn (with a public key).  Calculate the Kyber cipher text and send back an Ack.
         var stream = Client.GetStream();
@@ -166,7 +166,7 @@ internal class Peer : IDisposable
         }
         catch (EndOfStreamException ex)
         {
-            logger.LogWarning(ex, "End of stream from peer {PeerId} ({RemoteEndPoint}) before Syn could be processed. Closing.", PeerId, RemoteEndPoint);
+            nodeContext.Logger?.LogWarning(ex, "End of stream from peer {RemoteEndPoint} before Syn could be processed. Closing.", RemoteEndPoint);
             Client.Close();
             return false;
         }
@@ -178,43 +178,45 @@ internal class Peer : IDisposable
         }
         catch (InvalidProtocolBufferException ex)
         {
-            logger.LogError(ex, "Invalid Syn from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+            nodeContext.Logger?.LogError(ex, "Invalid Syn from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
             Client.Close();
             return false;
         }
 
-        using var scope = logger.BeginScope("Process Syn from {PeerId} ({RemoteEndPoint})", PeerId, RemoteEndPoint);
-        var encapsulatedKey = ComputeSharedKeyFromSynAndGetCipherText(syn.SessionPubKey.ToByteArray());
+        using var scope = nodeContext.Logger?.BeginScope("Process Syn from {RemoteEndPoint}", RemoteEndPoint);
+        var encapsulatedKey = ComputeSessionSharedKeyFromSynAndGetCipherText(syn.SessionPubKey.ToByteArray());
 
         // This peer's identity key was received in Syn.
         if (IdentityPublicKey != null)
-            throw new InvalidOperationException($"Peer {PeerId} should have an empty identity public key field at Syn time!");
+            throw new InvalidOperationException($"Peer at {RemoteEndPoint} should have an empty identity public key field at Syn time!");
 
-        IdentityPublicKey = syn.IdPubKey.ToByteArray();
+        var id_pub_key_bytes = syn.IdPubKey.ToByteArray();
+        IdentityPublicKey = id_pub_key_bytes.ToImmutableArray();
+        IdentityPublicKeyThumbprint = SHA256.HashData(id_pub_key_bytes).ToImmutableArray();
+        PeerName = CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint);
+        PeerShortName = $"{PeerName[..8]}...";
 
-        logger.LogDebug("ID Key for {PeerId} ({RemoteEndPoint}) is thumbprint {Thumbprint}", PeerId, RemoteEndPoint, CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint));
-
-        //Logger.LogCritical($"Key for {PeerId} ({peer.RemoteEndPoint}): {CryptoUtils.BytesToHex(peer.SharedKey!)}");
-
-        logger.LogDebug("Sending Ack to peer {PeerId} ({RemoteEndPoint})", PeerId, RemoteEndPoint);
+        nodeContext.Logger?.LogDebug("ID Key for {PeerShortName} ({RemoteEndPoint}) is thumbprint {Thumbprint}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint));
+        //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
+        nodeContext.Logger?.LogDebug("Sending Ack to peer {PeerShortName} ({RemoteEndPoint})", PeerShortName, RemoteEndPoint);
         var message = new Ack
         {
             ProtVer = Node.PROTOCOL_VERSION,
             CipherText = ByteString.CopyFrom(encapsulatedKey),
             // Now provide our own identity key in the response Ack
-            IdPubKey = ByteString.CopyFrom(nodeIdentityKeyPublicBytes.ToArray()),
+            IdPubKey = ByteString.CopyFrom([.. nodeContext.NodeIdentityKeyPublicBytes]),
         };
 
         await stream.WriteAsync(message.ToByteArray(), cancellationToken);
         return true;
     }
 
-    internal async Task<bool> HandleAck(ILogger logger, CancellationToken cancellationToken)
+    internal async Task<bool> HandleAck(NodeContext nodeContext, CancellationToken cancellationToken)
     {
         // Here we will get what we need to compute the shared secret.
         // At the start of this, we should NOT have any identity key, as that comes in the Ack.
         if (IdentityPublicKey != null)
-            throw new InvalidOperationException($"Peer {PeerId} already has an identity public key by the time this Ack was recieved.");
+            throw new InvalidOperationException($"Peer {PeerShortName} already has an identity public key by the time this Ack was recieved.");
 
         // We expect a Ack (with a cipher text).  Calculate the shared key and send back an encrypted SynAck.
         var stream = Client.GetStream();
@@ -230,7 +232,7 @@ internal class Peer : IDisposable
         }
         catch (EndOfStreamException ex)
         {
-            logger.LogWarning(ex, "End of stream from peer {PeerId} ({RemoteEndPoint}) before Ack could be processed. Closing.", PeerId, RemoteEndPoint);
+            nodeContext.Logger?.LogWarning(ex, "End of stream from peer {RemoteEndPoint} before Ack could be processed. Closing.", RemoteEndPoint);
             Client.Close();
             return false;
         }
@@ -241,13 +243,13 @@ internal class Peer : IDisposable
             ack = Ack.Parser.ParseFrom(buffer, 0, size);
             if (ack.CipherText == null || ack.CipherText.Length != 1568)
             {
-                logger.LogError("Invalid Ack (CipherText) from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+                nodeContext.Logger?.LogError("Invalid Ack (CipherText) from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
                 Client.Close();
                 return false;
             }
             if (ack.IdPubKey == null || ack.IdPubKey.Length != 2592)
             {
-                logger.LogError("Invalid Ack (IdPubKey) from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+                nodeContext.Logger?.LogError("Invalid Ack (IdPubKey) from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
                 Client.Close();
                 return false;
             }
@@ -255,27 +257,33 @@ internal class Peer : IDisposable
         }
         catch (InvalidProtocolBufferException ex)
         {
-            logger.LogError(ex, "Invalid Ack from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+            nodeContext.Logger?.LogError(ex, "Invalid Ack from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
             Client.Close();
             return false;
         }
 
-        using var scope = logger.BeginScope("Process Ack from {RemoteEndPoint}", RemoteEndPoint);
+        using var scope = nodeContext.Logger?.BeginScope("Process Ack from {RemoteEndPoint}", RemoteEndPoint);
 
-        ComputeSharedKeyFromAckCipherText(ack.CipherText.ToByteArray());
+        ComputeSessionSharedKeyFromAckCipherText([.. ack.CipherText.ToByteArray()]);
         if (IdentityPublicKey != null)
-            throw new InvalidOperationException($"Peer {PeerId} should have an empty identity public key field at Ack time!");
-        IdentityPublicKey = ack.IdPubKey.ToByteArray();
+            throw new InvalidOperationException($"Peer {PeerName} should have an empty identity public key field at Ack time!");
 
-        //Logger.LogCritical($"Key for {PeerId} ({RemoteEndPoint}): {CryptoUtils.BytesToHex(peer.SharedKey!)}");
+        var id_pub_key_bytes = ack.IdPubKey.ToByteArray();
+        IdentityPublicKey = id_pub_key_bytes.ToImmutableArray();
+        IdentityPublicKeyThumbprint = SHA256.HashData(id_pub_key_bytes).ToImmutableArray();
+        PeerName = CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint);
+        PeerShortName = $"{PeerName[..8]}...";
+
+        //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
         return true;
     }
 
     internal async Task<bool> HandleInputAsync(
-        ConcurrentDictionary<string, byte[]> thumbnailSignatureCache,
+        ConcurrentDictionary<string, ImmutableArray<byte>> thumbnailSignatureCache,
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(thumbnailSignatureCache);
         ObjectDisposedException.ThrowIf(disposed, Client);
 
         if (SessionSharedKey == null || Client.Available == 0)
@@ -293,7 +301,7 @@ internal class Peer : IDisposable
         }
         catch (EndOfStreamException ex)
         {
-            logger.LogWarning(ex, "End of stream from peer {PeerId} ({RemoteEndPoint}) could be processed. Closing.", PeerId, RemoteEndPoint);
+            logger.LogWarning(ex, "End of stream from peer {PeerShortName} ({RemoteEndPoint}) could be processed. Closing.", PeerShortName, RemoteEndPoint);
             Client.Close();
             return false;
         }
@@ -305,12 +313,15 @@ internal class Peer : IDisposable
         }
         catch (InvalidProtocolBufferException ex)
         {
-            logger.LogError(ex, "Invalid Envelope from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+            logger.LogError(ex, "Invalid Envelope from {PeerShortName} ({RemoteEndPoint}) could not be parsed. Closing.", PeerShortName, RemoteEndPoint);
             Client.Close();
             return false;
         }
 
         // Decrypt envelope contents.
+        //MessageUtils.Dump(envelope, logger);
+        //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
+
         byte[] nonce = envelope.Nonce.ToByteArray();
         byte[] cipher_text = envelope.Ciphertext.ToByteArray();
         byte[] envelope_plain_text = new byte[cipher_text.Length];
@@ -318,15 +329,22 @@ internal class Peer : IDisposable
         byte[] associated_data = envelope.AssociatedData.ToByteArray();
         try
         {
-            using ChaCha20Poly1305 cha = new(SessionSharedKey);
+            using ChaCha20Poly1305 cha = new([.. SessionSharedKey.Value]);
             cha.Decrypt(nonce, cipher_text, tag, envelope_plain_text, associated_data);
         }
-        catch (Exception ex)
+        catch (AuthenticationTagMismatchException atme)
         {
-            logger.LogError(ex, "Failed to decrypt message; closing down connection to victim {PeerId} ({RemoteEndPoint})", PeerId, RemoteEndPoint);
+            logger.LogError(atme, "Failed to decrypt message; closing down connection to victim {PeerShortName} ({RemoteEndPoint}). Incorrect session key?", PeerShortName, RemoteEndPoint);
             Client.Close();
             return false;
         }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to decrypt message; closing down connection to victim {PeerShortName} ({RemoteEndPoint})", PeerShortName, RemoteEndPoint);
+            Client.Close();
+            return false;
+        }
+        logger.LogTrace("Decrypted message from {PeerShortName} ({RemoteEndPoint})", PeerShortName, RemoteEndPoint);
 
         EnvelopePayload envelopePayload;
         try
@@ -335,7 +353,7 @@ internal class Peer : IDisposable
         }
         catch (InvalidProtocolBufferException ex)
         {
-            logger.LogError(ex, "Invalid EnvelopePayload from {PeerId} ({RemoteEndPoint}) could not be parsed. Closing.", PeerId, RemoteEndPoint);
+            logger.LogError(ex, "Invalid EnvelopePayload from {PeerShortName} ({RemoteEndPoint}) could not be parsed. Closing.", PeerShortName, RemoteEndPoint);
             Client.Close();
             return false;
         }
@@ -352,13 +370,13 @@ internal class Peer : IDisposable
             }
 
             // Is the signature valid?
-            if (!thumbnailSignatureCache.TryGetValue(CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint), out byte[]? sourceIdentityPublicKey))
+            if (!thumbnailSignatureCache.TryGetValue(CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey))
             {
                 logger.LogError("Discarding message with unverifiable signature for unknown thumbprint {Thumbprint}.", CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint));
                 return false;
             }
             var sourceVerify = new DilithiumSigner();
-            DilithiumPublicKeyParameters parms = new(DilithiumParameters.Dilithium5, sourceIdentityPublicKey);
+            DilithiumPublicKeyParameters parms = new(DilithiumParameters.Dilithium5, [.. sourceIdentityPublicKey]);
             sourceVerify.Init(false, parms);
             var dm_payload = dm.Payload.ToByteArray();
             if (!sourceVerify.VerifySignature(dm_payload, dm.Signature.ToByteArray()))
@@ -370,20 +388,20 @@ internal class Peer : IDisposable
             switch (dm.Payload)
             {
                 case Any any when any.Is(ConsoleAlert.Descriptor):
-                    logger.LogCritical("CONSOLE ALERT from {PeerId} ({RemoteEndPoint}): {Contents}", PeerId, RemoteEndPoint, any.Unpack<ConsoleAlert>().Message);
+                    logger.LogCritical("CONSOLE ALERT from {PeerShortName} ({RemoteEndPoint}): {Contents}", PeerShortName, RemoteEndPoint, any.Unpack<ConsoleAlert>().Message);
                     break;
                 case Any any when any.Is(Ping.Descriptor):
                     var ping = any.Unpack<Ping>();
-                    logger.LogCritical("PING {PeerId} ({RemoteEndPoint}): {Contents}", PeerId, RemoteEndPoint, $"id={ping.Identifier},seq={ping.Sequence}");
+                    logger.LogCritical("PING {PeerShortName} ({RemoteEndPoint}): {Contents}", PeerShortName, RemoteEndPoint, $"id={ping.Identifier},seq={ping.Sequence}");
                     break;
                 default:
-                    logger.LogCritical("From {PeerId} ({RemoteEndPoint}): {Contents}", PeerId, RemoteEndPoint, Encoding.UTF8.GetString(dm.Payload.ToByteArray()));
+                    logger.LogCritical("From {PeerShortName} ({RemoteEndPoint}): {Contents}", PeerShortName, RemoteEndPoint, Encoding.UTF8.GetString(dm.Payload.ToByteArray()));
                     break;
             }
             return true;
         }
 
-        logger.LogError("Unsupported envelope payload received from {PeerId} ({RemoteEndPoint}. Closing.", PeerId, RemoteEndPoint);
+        logger.LogError("Unsupported envelope payload received from {PeerShortName} ({RemoteEndPoint}. Closing.", PeerShortName, RemoteEndPoint);
         return false;
     }
 
@@ -407,9 +425,10 @@ internal class Peer : IDisposable
         disposed = true;
     }
 
-    public Envelope PrepareEnvelope(DirectedMessage directedMessage, ILogger logger)
+    public Envelope PrepareEnvelope(NodeContext nodeContext, DirectedMessage directedMessage)
     {
-        ArgumentNullException.ThrowIfNull(directedMessage, nameof(directedMessage));
+        ArgumentNullException.ThrowIfNull(nodeContext);
+        ArgumentNullException.ThrowIfNull(directedMessage);
 
         var envelope_payload = new EnvelopePayload
         {
@@ -417,46 +436,62 @@ internal class Peer : IDisposable
         };
 
         var envelope_payload_bytes = envelope_payload.ToByteArray();
-        return PrepareEnvelope(envelope_payload_bytes, logger);
+        return PrepareEnvelope(nodeContext, envelope_payload_bytes);
     }
 
-    private Envelope PrepareEnvelope(byte[] payload, ILogger logger)
+    private Envelope PrepareEnvelope(NodeContext nodeContext, byte[] payload)
     {
+        ArgumentNullException.ThrowIfNull(nodeContext);
         ArgumentNullException.ThrowIfNull(payload);
+        if (SessionSharedKey == null || SessionSharedKey.Value.Length == 0)
+        {
+            nodeContext.Logger?.LogError("Session key is not established with peer {PeerShortName} ({RemoteEndPoint})", PeerShortName, RemoteEndPoint);
+            throw new InvalidOperationException($"Session key is not established with peer {PeerShortName} ({RemoteEndPoint})");
+        }
 
         byte[] nonce = new byte[12];
         byte[] plain_text = payload;
         byte[] cipher_text = new byte[plain_text.Length];
         byte[] tag = new byte[16];
-        byte[] associated_data = [];
+        byte[]? associated_data = null; //new byte[4];
         try
         {
-            using ChaCha20Poly1305 cha = new(SessionSharedKey!);
+            using ChaCha20Poly1305 cha = new([.. SessionSharedKey.Value]);
             RandomNumberGenerator.Fill(nonce);
+            RandomNumberGenerator.Fill(associated_data);
             cha.Encrypt(nonce, plain_text, cipher_text, tag, associated_data);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to encrypt payload; closing down connection to victim {PeerId} ({RemoteEndPoint}).", PeerId, RemoteEndPoint);
+            nodeContext.Logger?.LogError(ex, "Failed to encrypt payload; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", PeerShortName, RemoteEndPoint);
             throw;
         }
 
-        return new Envelope
+        var envelope = new Envelope
         {
             Nonce = ByteString.CopyFrom(nonce),
             Ciphertext = ByteString.CopyFrom(cipher_text),
             Tag = ByteString.CopyFrom(tag),
-            AssociatedData = ByteString.CopyFrom(associated_data)
+            AssociatedData = associated_data == null ? ByteString.Empty : ByteString.CopyFrom(associated_data)
         };
+        //MessageUtils.Dump(envelope, nodeContext.Logger);
+        //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
+        return envelope;
     }
 
-    public async Task SendSyn(ImmutableArray<byte> nodeIdentityKeyPublicBytes, CancellationToken cancellationToken)
+    public async Task SendSyn(NodeContext nodeContext, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(nodeContext);
+
+        if (SessionPublicKey == null) {
+            throw new InvalidOperationException("SessionPublicKey not set, but I am the one sending the syn!");
+        }
+
         var message = new Syn
         {
             ProtVer = Node.PROTOCOL_VERSION,
-            SessionPubKey = ByteString.CopyFrom(SessionPublicKey),
-            IdPubKey = ByteString.CopyFrom([.. nodeIdentityKeyPublicBytes])
+            SessionPubKey = ByteString.CopyFrom([.. SessionPublicKey.Value]),
+            IdPubKey = ByteString.CopyFrom([.. nodeContext.NodeIdentityKeyPublicBytes])
         };
         await GetStream().WriteAsync(message.ToByteArray(), cancellationToken);
     }
