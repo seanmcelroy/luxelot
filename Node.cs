@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -15,7 +16,7 @@ using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 
 namespace Luxelot;
 
-internal partial class Node
+public partial class Node
 {
     public const uint PROTOCOL_VERSION = 1;
 
@@ -27,7 +28,7 @@ internal partial class Node
     private readonly ConcurrentDictionary<TaskEntry, Task> Tasks = [];
     private readonly ConcurrentDictionary<EndPoint, Peer> Peers = [];
     private readonly ConcurrentDictionary<string, ImmutableArray<byte>> ThumbnailSignatureCache = [];
-    private TcpClient? User;
+    internal TcpClient? User;
     private readonly Mutex UserMutex = new();
     private readonly AsymmetricCipherKeyPair IdentityKeys;
     public readonly ImmutableArray<byte> IdentityKeyPublicBytes;
@@ -44,11 +45,13 @@ internal partial class Node
         IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
         IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
         Name = CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint);
-        if (string.IsNullOrWhiteSpace(shortName)) {
+        if (string.IsNullOrWhiteSpace(shortName))
+        {
             ShortName = $"{Name[..8]}...";
             Logger = loggerFactory.CreateLogger($"Node {ShortName}");
         }
-        else {
+        else
+        {
             ShortName = shortName;
             Logger = loggerFactory.CreateLogger($"Node {shortName}({Name[..8]}...)");
         }
@@ -58,7 +61,7 @@ internal partial class Node
 
     public void Main(CancellationToken cancellationToken)
     {
-        var nodeContext = new NodeContext
+        var nodeContext = new NodeContext(this)
         {
             NodeShortName = ShortName,
             NodeIdentityKeyPublicBytes = IdentityKeyPublicBytes,
@@ -101,7 +104,7 @@ internal partial class Node
 
         Logger.LogTrace("Setting up peer connected input handler loop");
         {
-            var peer_handler_task = Task.Run(() => PeerHandleInputTask(cts.Token), cancellationToken);
+            var peer_handler_task = Task.Run(() => PeerHandleInputTask(nodeContext, cts.Token), cancellationToken);
             var peer_handler_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_handler_task_entry, peer_handler_task);
             Logger.LogTrace("Peer input handler loop is a persistent background worker task {TaskId}", peer_handler_task_entry.TaskId);
@@ -365,7 +368,7 @@ internal partial class Node
         }
     }
 
-    private async Task PeerHandleInputTask(CancellationToken cancellationToken)
+    private async Task PeerHandleInputTask(NodeContext context, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -375,7 +378,7 @@ internal partial class Node
             // Peer walk
             foreach (var peer in Peers.Values)
             {
-                var shutdown = !await peer.HandleInputAsync(ThumbnailSignatureCache, Logger, cancellationToken);
+                var shutdown = !await peer.HandleInputAsync(context, ThumbnailSignatureCache, cancellationToken);
                 if (shutdown)
                 {
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
@@ -420,7 +423,7 @@ internal partial class Node
                     };
                     try
                     {
-                        var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint.Value, payload, Logger);
+                        var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint.Value, payload);
                         var envelope = peer.PrepareEnvelope(context, directed);
                         await peer.SendEnvelope(envelope, cancellationToken);
                     }
@@ -445,7 +448,6 @@ internal partial class Node
         //Logger.LogTrace($"USER INPUT: '{input}'");
         var words = QuotedWordArrayRegex().Split(input).Where(s => s.Length > 0).ToArray();
         var command = words.First();
-        var stream = User.GetStream();
 
         switch (command.ToLowerInvariant())
         {
@@ -453,29 +455,33 @@ internal partial class Node
             case "help":
                 var cmds = new string[] { "node", "peers", "ping" };
                 var cmd_string = cmds.Aggregate((c, n) => $"{c}\r\n{n}");
-                await stream.WriteAsync(Encoding.UTF8.GetBytes($"{cmd_string}\r\n"), cancellationToken);
+                await context.WriteLineToUserAsync(cmd_string, cancellationToken);
                 break;
             case "node":
-                await stream.WriteAsync(Encoding.UTF8.GetBytes($"ID Public Key: {CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint)}\r\n"), cancellationToken);
+                await context.WriteLineToUserAsync($"ID Public Key: {CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
                 break;
             case "peers":
-                await stream.WriteAsync(Encoding.UTF8.GetBytes("Peer List\r\n"), cancellationToken);
-                await stream.WriteAsync(Encoding.UTF8.GetBytes("PeerShortName RemoteEndPoint BytesReceived IdPubKeyThumbprint\r\n"), cancellationToken);
+                await context.WriteLineToUserAsync("Peer List", cancellationToken);
+
+                var rep_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
+
+                await context.WriteLineToUserAsync($"PeerShortName {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint", cancellationToken);
+
                 foreach (var peer in Peers.Values)
                 {
-                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"{peer.PeerShortName} {peer.RemoteEndPoint} {peer.BytesReceived}(r) {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}\r\n"), cancellationToken);
+                    await context.WriteLineToUserAsync($"{peer.PeerShortName.PadRight("PeerShortName".Length)} {(peer.RemoteEndPoint == null ? string.Empty : peer.RemoteEndPoint.ToString()).PadRight(rep_len)} {peer.BytesReceived} {peer.BytesSent} {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}", cancellationToken);
                 }
-                await stream.WriteAsync(Encoding.UTF8.GetBytes("End of Peer List\r\n"), cancellationToken);
+                await context.WriteLineToUserAsync("End of Peer List", cancellationToken);
                 break;
 
             case "ping":
                 if (words.Length != 2)
-                    await stream.WriteAsync(Encoding.UTF8.GetBytes($"PING command requires one argument, the peer name to direct the ping.\r\n"), cancellationToken);
+                    await context.WriteLineToUserAsync($"PING command requires one argument, the peer name to direct the ping.", cancellationToken);
                 else
                 {
                     var peer_to_ping = Peers.Values.FirstOrDefault(p => p.PeerShortName.Equals(words[1]));
                     if (peer_to_ping == null)
-                        await stream.WriteAsync(Encoding.UTF8.GetBytes($"No peer found with name '{words[1]}'.\r\n"), cancellationToken);
+                        await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
                     else
                     {
                         var ping = new Messages.Ping
@@ -484,7 +490,7 @@ internal partial class Node
                             Sequence = 1,
                             Payload = ByteString.Empty
                         };
-                        var dm = PrepareDirectedMessage(peer_to_ping.IdentityPublicKeyThumbprint.Value, ping, Logger);
+                        var dm = PrepareDirectedMessage(peer_to_ping.IdentityPublicKeyThumbprint.Value, ping);
                         var env = peer_to_ping.PrepareEnvelope(context, dm);
                         await peer_to_ping.SendEnvelope(env, cancellationToken);
                     }
@@ -508,7 +514,7 @@ internal partial class Node
             Logger.LogError("Dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}!", peer.PeerShortName, peer.RemoteEndPoint);
     }
 
-    public DirectedMessage PrepareDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload, ILogger logger)
+    public DirectedMessage PrepareDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload)
     {
         ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
         ArgumentNullException.ThrowIfNull(payload);
