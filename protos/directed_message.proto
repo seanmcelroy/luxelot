@@ -1,11 +1,13 @@
 syntax = "proto3";
 
+import "google/protobuf/any.proto";
+
 option csharp_namespace = "Luxelot.Messages";
 
 message DirectedMessage {
 
     bytes src_identity_public_key_thumbprint = 1;
     bytes dst_identity_public_key_thumbprint = 2;
-    bytes payload = 3;
+    google.protobuf.Any payload = 3;
     bytes signature = 4;
 }

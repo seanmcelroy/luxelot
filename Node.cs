@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
@@ -229,7 +230,7 @@ internal partial class Node
                         }
 
                         var input = Encoding.UTF8.GetString(buffer, 0, size);
-                        await HandleUserInput(input);
+                        await HandleUserInput(input, cancellationToken);
                     }
                 }
             }
@@ -378,15 +379,9 @@ internal partial class Node
     {
         if (peer.IsWriteable)
         {
-            var stream = peer.GetStream();
             Logger.LogDebug("Sending Syn to peer {PeerId} ({RemoteEndPoint})", peer.PeerId, peer.RemoteEndPoint);
-            var message = new Syn
-            {
-                ProtVer = PROTOCOL_VERSION,
-                SessionPubKey = ByteString.CopyFrom(peer.SessionPublicKey),
-                IdPubKey = ByteString.CopyFrom([.. IdentityKeyPublicBytes])
-            };
-            await stream.WriteAsync(message.ToByteArray(), cancellationToken);
+            await peer.SendSyn(IdentityKeyPublicBytes, cancellationToken);
+
             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
             {
                 var shutdown = !await peer.HandleAck(Logger, cancellationToken);
@@ -406,12 +401,15 @@ internal partial class Node
 
                     // Okay, we made it!
                     Logger.LogDebug("Sending test message to peer {PeerId} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.PeerId, peer.RemoteEndPoint, CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
-                    byte[] payload = Encoding.UTF8.GetBytes("WE DID IT!");
+
+                    var payload = new ConsoleAlert {
+                        Message = "WE DID IT!"
+                    };
                     try
                     {
                         var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint!, payload, Logger);
                         var envelope = peer.PrepareEnvelope(directed, Logger);
-                        await peer.GetStream().WriteAsync(envelope.ToByteArray(), cancellationToken);
+                        await peer.SendEnvelope(envelope, cancellationToken);
                     }
                     catch (Exception ex)
                     {
@@ -425,7 +423,7 @@ internal partial class Node
         }
     }
 
-    private async Task HandleUserInput(string input)
+    private async Task HandleUserInput(string input, CancellationToken cancellationToken)
     {
         input = input.Trim(' ', '\r', '\n');
         if (input.Length == 0)
@@ -473,8 +471,11 @@ internal partial class Node
                         {
                             Identifier = 1,
                             Sequence = 1,
-                            Payload = null
+                            Payload = ByteString.Empty
                         };
+                        var dm = PrepareDirectedMessage(peer_to_ping.IdentityPublicKeyThumbprint, ping, Logger);
+                        var env = peer_to_ping.PrepareEnvelope(dm, Logger);
+                        await peer_to_ping.SendEnvelope(env, cancellationToken);
                     }
                 }
                 break;
@@ -496,7 +497,7 @@ internal partial class Node
             Logger.LogError("Dead peer {PeerId} RemoteEndPoint {RemoteEndPoint}!", peer.PeerId, peer.RemoteEndPoint);
     }
 
-    public DirectedMessage PrepareDirectedMessage(byte[] destinationIdPubKeyThumbprint, byte[] payload, ILogger logger)
+    public DirectedMessage PrepareDirectedMessage(byte[] destinationIdPubKeyThumbprint, IMessage payload, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
         ArgumentNullException.ThrowIfNull(payload);
@@ -507,7 +508,8 @@ internal partial class Node
         var nodeIdPrivateKey = (DilithiumPrivateKeyParameters)IdentityKeys.Private;
         var nodeSigner = new DilithiumSigner();
         nodeSigner.Init(true, nodeIdPrivateKey);
-        var signature = nodeSigner.GenerateSignature(payload);
+        var packed_payload = Any.Pack(payload);
+        var signature = nodeSigner.GenerateSignature(packed_payload.ToByteArray());
 
         var dm = new DirectedMessage
         {
@@ -515,7 +517,7 @@ internal partial class Node
             SrcIdentityPublicKeyThumbprint = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]),
             // The desitnation is some other node I know by its thumbprint.
             DstIdentityPublicKeyThumbprint = ByteString.CopyFrom(destinationIdPubKeyThumbprint),
-            Payload = ByteString.CopyFrom(payload),
+            Payload = packed_payload,
             Signature = ByteString.CopyFrom(signature),
         };
 

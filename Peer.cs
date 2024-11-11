@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
@@ -360,12 +361,25 @@ internal class Peer : IDisposable
             DilithiumPublicKeyParameters parms = new(DilithiumParameters.Dilithium5, sourceIdentityPublicKey);
             sourceVerify.Init(false, parms);
             var dm_payload = dm.Payload.ToByteArray();
-            if (!sourceVerify.VerifySignature(dm_payload, dm.Signature.ToByteArray())) {
+            if (!sourceVerify.VerifySignature(dm_payload, dm.Signature.ToByteArray()))
+            {
                 logger.LogError("Discarding message with invalid signature for known thumbprint {Thumbprint}.", CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint));
                 return false;
             }
 
-            logger.LogCritical("From {PeerId} ({RemoteEndPoint}): {Contents}", PeerId, RemoteEndPoint, Encoding.UTF8.GetString(dm.Payload.ToByteArray()));
+            switch (dm.Payload)
+            {
+                case Any any when any.Is(ConsoleAlert.Descriptor):
+                    logger.LogCritical("CONSOLE ALERT from {PeerId} ({RemoteEndPoint}): {Contents}", PeerId, RemoteEndPoint, any.Unpack<ConsoleAlert>().Message);
+                    break;
+                case Any any when any.Is(Ping.Descriptor):
+                    var ping = any.Unpack<Ping>();
+                    logger.LogCritical("PING {PeerId} ({RemoteEndPoint}): {Contents}", PeerId, RemoteEndPoint, $"id={ping.Identifier},seq={ping.Sequence}");
+                    break;
+                default:
+                    logger.LogCritical("From {PeerId} ({RemoteEndPoint}): {Contents}", PeerId, RemoteEndPoint, Encoding.UTF8.GetString(dm.Payload.ToByteArray()));
+                    break;
+            }
             return true;
         }
 
@@ -434,6 +448,23 @@ internal class Peer : IDisposable
             Tag = ByteString.CopyFrom(tag),
             AssociatedData = ByteString.CopyFrom(associated_data)
         };
+    }
+
+    public async Task SendSyn(ImmutableArray<byte> nodeIdentityKeyPublicBytes, CancellationToken cancellationToken)
+    {
+        var message = new Syn
+        {
+            ProtVer = Node.PROTOCOL_VERSION,
+            SessionPubKey = ByteString.CopyFrom(SessionPublicKey),
+            IdPubKey = ByteString.CopyFrom([.. nodeIdentityKeyPublicBytes])
+        };
+        await GetStream().WriteAsync(message.ToByteArray(), cancellationToken);
+    }
+
+    public async Task SendEnvelope(Envelope envelope, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        await Client.GetStream().WriteAsync(envelope.ToByteArray(), cancellationToken);
     }
 }
 
