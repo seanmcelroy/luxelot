@@ -65,6 +65,7 @@ public partial class Node
         {
             NodeShortName = ShortName,
             NodeIdentityKeyPublicBytes = IdentityKeyPublicBytes,
+            NodeIdentityKeyPublicThumbprint = IdentityKeyPublicThumbprint,
             Logger = Logger,
         };
 
@@ -425,7 +426,7 @@ public partial class Node
                     {
                         var directed = PrepareDirectedMessage(peer.IdentityPublicKeyThumbprint.Value, payload);
                         var envelope = peer.PrepareEnvelope(context, directed);
-                        await peer.SendEnvelope(envelope, cancellationToken);
+                        await peer.SendEnvelope(context, envelope, cancellationToken);
                     }
                     catch (Exception ex)
                     {
@@ -454,7 +455,7 @@ public partial class Node
             case "?":
             case "help":
                 var cmds = new string[] { "node", "peers", "ping" };
-                var cmd_string = cmds.Aggregate((c, n) => $"{c}\r\n{n}");
+                var cmd_string = cmds.Order().Aggregate((c, n) => $"{c}\r\n{n}");
                 await context.WriteLineToUserAsync(cmd_string, cancellationToken);
                 break;
             case "node":
@@ -475,24 +476,17 @@ public partial class Node
                 break;
 
             case "ping":
-                if (words.Length != 2)
-                    await context.WriteLineToUserAsync($"PING command requires one argument, the peer name to direct the ping.", cancellationToken);
+                if (words.Length != 2 && words.Length != 3)
+                    await context.WriteLineToUserAsync($"PING command requires one or two arguments, the peer name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
                 else
                 {
-                    var peer_to_ping = Peers.Values.FirstOrDefault(p => p.PeerShortName.Equals(words[1]));
+                    var peer_to_ping = Peers.Values.FirstOrDefault(p => string.Compare(p.PeerShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
                     if (peer_to_ping == null)
                         await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
                     else
                     {
-                        var ping = new Messages.Ping
-                        {
-                            Identifier = 1,
-                            Sequence = 1,
-                            Payload = ByteString.Empty
-                        };
-                        var dm = PrepareDirectedMessage(peer_to_ping.IdentityPublicKeyThumbprint.Value, ping);
-                        var env = peer_to_ping.PrepareEnvelope(context, dm);
-                        await peer_to_ping.SendEnvelope(env, cancellationToken);
+                        ImmutableArray<byte>? ping_target = words.Length == 2 ? null : [.. CryptoUtils.HexToBytes(words[2])];
+                        var success = await peer_to_ping.SendPing(context, ping_target, cancellationToken);
                     }
                 }
                 break;
@@ -531,15 +525,23 @@ public partial class Node
         var dm = new DirectedMessage
         {
             // The source is my own node.
-            SrcIdentityPublicKeyThumbprint = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]),
+            SrcIdentityThumbprint = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]),
             // The desitnation is some other node I know by its thumbprint.
-            DstIdentityPublicKeyThumbprint = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]),
+            DstIdentityThumbprint = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]),
             Payload = packed_payload,
             Signature = ByteString.CopyFrom(signature),
         };
 
         return dm;
     }
+
+    public async Task ForwardDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload) {
+
+    }
+
+    public IEnumerable<ImmutableArray<byte>> GetNeighborThumbprints() =>
+        Peers.Where(p => p.Value.IdentityPublicKeyThumbprint != null)
+            .Select(p => p.Value.IdentityPublicKeyThumbprint!.Value);
 
     [GeneratedRegex("(?:^|\\s)(\\\"(?:[^\\\"])*\\\"|[^\\s]*)")]
     private static partial Regex QuotedWordArrayRegex();

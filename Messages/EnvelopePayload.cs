@@ -24,14 +24,16 @@ namespace Luxelot.Messages {
     static EnvelopePayloadReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "ChZlbnZlbG9wZV9wYXlsb2FkLnByb3RvGhZkaXJlY3RlZF9tZXNzYWdlLnBy",
-            "b3RvImIKD0VudmVsb3BlUGF5bG9hZBIXCg1lcnJvcl9tZXNzYWdlGAEgASgJ",
-            "SAASLAoQZGlyZWN0ZWRfbWVzc2FnZRgCIAEoCzIQLkRpcmVjdGVkTWVzc2Fn",
-            "ZUgAQggKBnBheWxvZEITqgIQTHV4ZWxvdC5NZXNzYWdlc2IGcHJvdG8z"));
+            "ChZlbnZlbG9wZV9wYXlsb2FkLnByb3RvGhdmb3J3YXJkZWRfbWVzc2FnZS5w",
+            "cm90bxoWZGlyZWN0ZWRfbWVzc2FnZS5wcm90byKTAQoPRW52ZWxvcGVQYXls",
+            "b2FkEhcKDWVycm9yX21lc3NhZ2UYASABKAlIABIuChFmb3J3YXJkZWRfbWVz",
+            "c2FnZRgCIAEoCzIRLkZvcndhcmRlZE1lc3NhZ2VIABIsChBkaXJlY3RlZF9t",
+            "ZXNzYWdlGAMgASgLMhAuRGlyZWN0ZWRNZXNzYWdlSABCCQoHcGF5bG9hZEIT",
+            "qgIQTHV4ZWxvdC5NZXNzYWdlc2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
-          new pbr::FileDescriptor[] { global::Luxelot.Messages.DirectedMessageReflection.Descriptor, },
+          new pbr::FileDescriptor[] { global::Luxelot.Messages.ForwardedMessageReflection.Descriptor, global::Luxelot.Messages.DirectedMessageReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.EnvelopePayload), global::Luxelot.Messages.EnvelopePayload.Parser, new[]{ "ErrorMessage", "DirectedMessage" }, new[]{ "Paylod" }, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.EnvelopePayload), global::Luxelot.Messages.EnvelopePayload.Parser, new[]{ "ErrorMessage", "ForwardedMessage", "DirectedMessage" }, new[]{ "Payload" }, null, null, null)
           }));
     }
     #endregion
@@ -72,11 +74,14 @@ namespace Luxelot.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public EnvelopePayload(EnvelopePayload other) : this() {
-      switch (other.PaylodCase) {
-        case PaylodOneofCase.ErrorMessage:
+      switch (other.PayloadCase) {
+        case PayloadOneofCase.ErrorMessage:
           ErrorMessage = other.ErrorMessage;
           break;
-        case PaylodOneofCase.DirectedMessage:
+        case PayloadOneofCase.ForwardedMessage:
+          ForwardedMessage = other.ForwardedMessage.Clone();
+          break;
+        case PayloadOneofCase.DirectedMessage:
           DirectedMessage = other.DirectedMessage.Clone();
           break;
       }
@@ -95,44 +100,57 @@ namespace Luxelot.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public string ErrorMessage {
-      get { return paylodCase_ == PaylodOneofCase.ErrorMessage ? (string) paylod_ : ""; }
+      get { return payloadCase_ == PayloadOneofCase.ErrorMessage ? (string) payload_ : ""; }
       set {
-        paylod_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
-        paylodCase_ = PaylodOneofCase.ErrorMessage;
+        payload_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+        payloadCase_ = PayloadOneofCase.ErrorMessage;
+      }
+    }
+
+    /// <summary>Field number for the "forwarded_message" field.</summary>
+    public const int ForwardedMessageFieldNumber = 2;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Luxelot.Messages.ForwardedMessage ForwardedMessage {
+      get { return payloadCase_ == PayloadOneofCase.ForwardedMessage ? (global::Luxelot.Messages.ForwardedMessage) payload_ : null; }
+      set {
+        payload_ = value;
+        payloadCase_ = value == null ? PayloadOneofCase.None : PayloadOneofCase.ForwardedMessage;
       }
     }
 
     /// <summary>Field number for the "directed_message" field.</summary>
-    public const int DirectedMessageFieldNumber = 2;
+    public const int DirectedMessageFieldNumber = 3;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public global::Luxelot.Messages.DirectedMessage DirectedMessage {
-      get { return paylodCase_ == PaylodOneofCase.DirectedMessage ? (global::Luxelot.Messages.DirectedMessage) paylod_ : null; }
+      get { return payloadCase_ == PayloadOneofCase.DirectedMessage ? (global::Luxelot.Messages.DirectedMessage) payload_ : null; }
       set {
-        paylod_ = value;
-        paylodCase_ = value == null ? PaylodOneofCase.None : PaylodOneofCase.DirectedMessage;
+        payload_ = value;
+        payloadCase_ = value == null ? PayloadOneofCase.None : PayloadOneofCase.DirectedMessage;
       }
     }
 
-    private object paylod_;
-    /// <summary>Enum of possible cases for the "paylod" oneof.</summary>
-    public enum PaylodOneofCase {
+    private object payload_;
+    /// <summary>Enum of possible cases for the "payload" oneof.</summary>
+    public enum PayloadOneofCase {
       None = 0,
       ErrorMessage = 1,
-      DirectedMessage = 2,
+      ForwardedMessage = 2,
+      DirectedMessage = 3,
     }
-    private PaylodOneofCase paylodCase_ = PaylodOneofCase.None;
+    private PayloadOneofCase payloadCase_ = PayloadOneofCase.None;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public PaylodOneofCase PaylodCase {
-      get { return paylodCase_; }
+    public PayloadOneofCase PayloadCase {
+      get { return payloadCase_; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public void ClearPaylod() {
-      paylodCase_ = PaylodOneofCase.None;
-      paylod_ = null;
+    public void ClearPayload() {
+      payloadCase_ = PayloadOneofCase.None;
+      payload_ = null;
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -151,8 +169,9 @@ namespace Luxelot.Messages {
         return true;
       }
       if (ErrorMessage != other.ErrorMessage) return false;
+      if (!object.Equals(ForwardedMessage, other.ForwardedMessage)) return false;
       if (!object.Equals(DirectedMessage, other.DirectedMessage)) return false;
-      if (PaylodCase != other.PaylodCase) return false;
+      if (PayloadCase != other.PayloadCase) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -160,9 +179,10 @@ namespace Luxelot.Messages {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override int GetHashCode() {
       int hash = 1;
-      if (paylodCase_ == PaylodOneofCase.ErrorMessage) hash ^= ErrorMessage.GetHashCode();
-      if (paylodCase_ == PaylodOneofCase.DirectedMessage) hash ^= DirectedMessage.GetHashCode();
-      hash ^= (int) paylodCase_;
+      if (payloadCase_ == PayloadOneofCase.ErrorMessage) hash ^= ErrorMessage.GetHashCode();
+      if (payloadCase_ == PayloadOneofCase.ForwardedMessage) hash ^= ForwardedMessage.GetHashCode();
+      if (payloadCase_ == PayloadOneofCase.DirectedMessage) hash ^= DirectedMessage.GetHashCode();
+      hash ^= (int) payloadCase_;
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -181,12 +201,16 @@ namespace Luxelot.Messages {
     #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       output.WriteRawMessage(this);
     #else
-      if (paylodCase_ == PaylodOneofCase.ErrorMessage) {
+      if (payloadCase_ == PayloadOneofCase.ErrorMessage) {
         output.WriteRawTag(10);
         output.WriteString(ErrorMessage);
       }
-      if (paylodCase_ == PaylodOneofCase.DirectedMessage) {
+      if (payloadCase_ == PayloadOneofCase.ForwardedMessage) {
         output.WriteRawTag(18);
+        output.WriteMessage(ForwardedMessage);
+      }
+      if (payloadCase_ == PayloadOneofCase.DirectedMessage) {
+        output.WriteRawTag(26);
         output.WriteMessage(DirectedMessage);
       }
       if (_unknownFields != null) {
@@ -199,12 +223,16 @@ namespace Luxelot.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
-      if (paylodCase_ == PaylodOneofCase.ErrorMessage) {
+      if (payloadCase_ == PayloadOneofCase.ErrorMessage) {
         output.WriteRawTag(10);
         output.WriteString(ErrorMessage);
       }
-      if (paylodCase_ == PaylodOneofCase.DirectedMessage) {
+      if (payloadCase_ == PayloadOneofCase.ForwardedMessage) {
         output.WriteRawTag(18);
+        output.WriteMessage(ForwardedMessage);
+      }
+      if (payloadCase_ == PayloadOneofCase.DirectedMessage) {
+        output.WriteRawTag(26);
         output.WriteMessage(DirectedMessage);
       }
       if (_unknownFields != null) {
@@ -217,10 +245,13 @@ namespace Luxelot.Messages {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public int CalculateSize() {
       int size = 0;
-      if (paylodCase_ == PaylodOneofCase.ErrorMessage) {
+      if (payloadCase_ == PayloadOneofCase.ErrorMessage) {
         size += 1 + pb::CodedOutputStream.ComputeStringSize(ErrorMessage);
       }
-      if (paylodCase_ == PaylodOneofCase.DirectedMessage) {
+      if (payloadCase_ == PayloadOneofCase.ForwardedMessage) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(ForwardedMessage);
+      }
+      if (payloadCase_ == PayloadOneofCase.DirectedMessage) {
         size += 1 + pb::CodedOutputStream.ComputeMessageSize(DirectedMessage);
       }
       if (_unknownFields != null) {
@@ -235,11 +266,17 @@ namespace Luxelot.Messages {
       if (other == null) {
         return;
       }
-      switch (other.PaylodCase) {
-        case PaylodOneofCase.ErrorMessage:
+      switch (other.PayloadCase) {
+        case PayloadOneofCase.ErrorMessage:
           ErrorMessage = other.ErrorMessage;
           break;
-        case PaylodOneofCase.DirectedMessage:
+        case PayloadOneofCase.ForwardedMessage:
+          if (ForwardedMessage == null) {
+            ForwardedMessage = new global::Luxelot.Messages.ForwardedMessage();
+          }
+          ForwardedMessage.MergeFrom(other.ForwardedMessage);
+          break;
+        case PayloadOneofCase.DirectedMessage:
           if (DirectedMessage == null) {
             DirectedMessage = new global::Luxelot.Messages.DirectedMessage();
           }
@@ -267,8 +304,17 @@ namespace Luxelot.Messages {
             break;
           }
           case 18: {
+            global::Luxelot.Messages.ForwardedMessage subBuilder = new global::Luxelot.Messages.ForwardedMessage();
+            if (payloadCase_ == PayloadOneofCase.ForwardedMessage) {
+              subBuilder.MergeFrom(ForwardedMessage);
+            }
+            input.ReadMessage(subBuilder);
+            ForwardedMessage = subBuilder;
+            break;
+          }
+          case 26: {
             global::Luxelot.Messages.DirectedMessage subBuilder = new global::Luxelot.Messages.DirectedMessage();
-            if (paylodCase_ == PaylodOneofCase.DirectedMessage) {
+            if (payloadCase_ == PayloadOneofCase.DirectedMessage) {
               subBuilder.MergeFrom(DirectedMessage);
             }
             input.ReadMessage(subBuilder);
@@ -295,8 +341,17 @@ namespace Luxelot.Messages {
             break;
           }
           case 18: {
+            global::Luxelot.Messages.ForwardedMessage subBuilder = new global::Luxelot.Messages.ForwardedMessage();
+            if (payloadCase_ == PayloadOneofCase.ForwardedMessage) {
+              subBuilder.MergeFrom(ForwardedMessage);
+            }
+            input.ReadMessage(subBuilder);
+            ForwardedMessage = subBuilder;
+            break;
+          }
+          case 26: {
             global::Luxelot.Messages.DirectedMessage subBuilder = new global::Luxelot.Messages.DirectedMessage();
-            if (paylodCase_ == PaylodOneofCase.DirectedMessage) {
+            if (payloadCase_ == PayloadOneofCase.DirectedMessage) {
               subBuilder.MergeFrom(DirectedMessage);
             }
             input.ReadMessage(subBuilder);

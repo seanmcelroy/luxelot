@@ -73,10 +73,11 @@ public static class CryptoUtils
         return privateKeyBytes;
     }
 
-    public static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(KyberPublicKeyParameters publicKey)
+    public static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ImmutableArray<byte> publicKeyBytes)
     {
-        ArgumentNullException.ThrowIfNull(publicKey);
+        ArgumentNullException.ThrowIfNull(publicKeyBytes);
 
+        KyberPublicKeyParameters publicKey = new(KyberParameters.kyber1024, [.. publicKeyBytes]);
         ISecretWithEncapsulation secret_with_encapsulation;
 
         var okay = mutex.WaitOne(10000);
@@ -106,7 +107,7 @@ public static class CryptoUtils
         return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey);
     }
 
-    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte>encapsulatedKey)
+    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte> encapsulatedKey)
     {
         ArgumentNullException.ThrowIfNull(privateKey);
         ArgumentNullException.ThrowIfNull(encapsulatedKey);
@@ -131,14 +132,26 @@ public static class CryptoUtils
         return [.. key_bytes];
     }
 
-    public static string BytesToHex(IEnumerable<byte>? bytes)
+    public static bool ValidateDilithiumSignature(ImmutableArray<byte> publicKey, byte[] message, byte[] signature)
     {
-        if (bytes == null)
-            return string.Empty;
+        var sourceVerify = new DilithiumSigner();
+        DilithiumPublicKeyParameters parms = new(DilithiumParameters.Dilithium5, [.. publicKey]);
+        sourceVerify.Init(false, parms);
+        return sourceVerify.VerifySignature(message, signature);
+    }
 
-        StringBuilder result = new();
-        foreach (byte b in bytes)
-            _ = result.Append(Convert.ToString((b & 0xff) + 0x100, 16)[1..]);
-        return result.ToString();
+    public static string BytesToHex(IEnumerable<byte>? bytes) =>
+        bytes == null ? string.Empty : Convert.ToHexString(bytes.ToArray());
+
+    public static byte[] HexToBytes(string hex)
+    {
+        try {
+            return string.IsNullOrWhiteSpace(hex) ? [] : Convert.FromHexString(hex);
+        }
+        catch (FormatException)
+        {
+            // Swallow.
+            return [];
+        }
     }
 }

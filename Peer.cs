@@ -9,9 +9,6 @@ using Google.Protobuf.WellKnownTypes;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
-using Org.BouncyCastle.Pqc.Crypto.Crystals.Kyber;
-using Org.BouncyCastle.Utilities;
 
 namespace Luxelot;
 
@@ -68,15 +65,14 @@ internal class Peer : IDisposable
         return peer;
     }
 
-    private byte[] ComputeSessionSharedKeyFromSynAndGetCipherText(byte[] publicKey)
+    private byte[] ComputeSessionSharedKeyFromSynAndGetCipherText(ImmutableArray<byte> publicKey)
     {
         ArgumentNullException.ThrowIfNull(publicKey);
 
         if (SessionSharedKey != null)
             throw new InvalidOperationException("Shared key already computed!");
 
-        KyberPublicKeyParameters peer_public = new(KyberParameters.kyber1024, publicKey);
-        var secretKeyWithEncapsulationSender = CryptoUtils.GenerateChrystalsKyberEncryptionKey(peer_public);
+        var secretKeyWithEncapsulationSender = CryptoUtils.GenerateChrystalsKyberEncryptionKey(publicKey);
 
         // Shared Key
         var encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
@@ -184,7 +180,7 @@ internal class Peer : IDisposable
         }
 
         using var scope = nodeContext.Logger?.BeginScope("Process Syn from {RemoteEndPoint}", RemoteEndPoint);
-        var encapsulatedKey = ComputeSessionSharedKeyFromSynAndGetCipherText(syn.SessionPubKey.ToByteArray());
+        var encapsulatedKey = ComputeSessionSharedKeyFromSynAndGetCipherText([.. syn.SessionPubKey.ToByteArray()]);
 
         // This peer's identity key was received in Syn.
         if (IdentityPublicKey != null)
@@ -301,7 +297,7 @@ internal class Peer : IDisposable
 
         var directedMessage = nodeContext.PrepareDirectedMessage(IdentityPublicKeyThumbprint.Value, pong);
         var envelope = PrepareEnvelope(nodeContext, directedMessage);
-        await SendEnvelope(envelope, cancellationToken);
+        await SendEnvelope(nodeContext, envelope, cancellationToken);
         return true;
     }
 
@@ -347,7 +343,7 @@ internal class Peer : IDisposable
         }
 
         // Decrypt envelope contents.
-        //MessageUtils.Dump(envelope, logger);
+        //MessageUtils.Dump(envelope, nodeContext.Logger);
         //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
 
         byte[] nonce = envelope.Nonce.ToByteArray();
@@ -386,31 +382,67 @@ internal class Peer : IDisposable
             return false;
         }
 
-        if (envelopePayload.DirectedMessage != null)
+
+        if (!string.IsNullOrEmpty(envelopePayload.ErrorMessage))
+        {
+            nodeContext.Logger?.LogError("ERROR RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): {ErrorMessage}", PeerShortName, RemoteEndPoint, envelopePayload.ErrorMessage);
+            Client.Close();
+            return false;
+        }
+        else if (envelopePayload.ForwardedMessage != null)
+        {
+            var fwd = envelopePayload.ForwardedMessage;
+
+            nodeContext.Logger?.LogCritical("FORWARDED MESSAGE RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): ForwardId={ForwardId}", PeerShortName, RemoteEndPoint, fwd.ForwardId);
+            Client.Close();
+            return true; // TODO, handle a received message for forwarding.
+        }
+        else if (envelopePayload.DirectedMessage != null)
         {
             var dm = envelopePayload.DirectedMessage;
+            //MessageUtils.Dump(dm, nodeContext.Logger);
+
+            var isSenderVerifiable = thumbnailSignatureCache.TryGetValue(CryptoUtils.BytesToHex(dm.SrcIdentityThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey);
+            var dm_payload = dm.Payload.ToByteArray();
+            var isSignatureValid = isSenderVerifiable && CryptoUtils.ValidateDilithiumSignature(sourceIdentityPublicKey, dm_payload, dm.Signature.ToByteArray());
+
             // Is this destined for me?
-            if (Enumerable.SequenceEqual(IdentityPublicKeyThumbprint, dm.DstIdentityPublicKeyThumbprint))
+            if (!Enumerable.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint, dm.DstIdentityThumbprint))
             {
-                nodeContext.Logger?.LogTrace("Discarding message intended for node thumbprint {Thumbprint1}.  I have thumbprint {Thumbprint2}.", CryptoUtils.BytesToHex(dm.DstIdentityPublicKeyThumbprint), CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint));
-                // TODO: Implement routing to other node, if possible.
+                // It is NOT destined for me.  But can I be useful and verify the signature so I do not forward corruption?
+                if (isSenderVerifiable && !isSignatureValid)
+                {
+                    nodeContext.Logger?.LogWarning("Discarding corrupt message intended for {DestinationThumbprint}.", CryptoUtils.BytesToHex(dm.DstIdentityThumbprint));
+                    return true;
+                }
+
+                // Okay, it was NOT destined for me, but it was not wrapped as a forward.
+                // This peer must be confused, or it has intentionally done this to get me to cough up my table of immediate neighbors.
+                // Which I will do.  TODO Consider security implications vs. utility of this behavior.
+                nodeContext.Logger?.LogInformation("Misdirected direct message intended for {DestinationThumbprint} from {PeerShortName}; returning unreachable error.", CryptoUtils.BytesToHex(dm.DstIdentityThumbprint), PeerShortName);
+                var neighbors = nodeContext.GetNeighborThumbprints();
+                var err = new ErrorDestinationUnreachable
+                {
+                    UnreachableIdentityThumbprint = dm.DstIdentityThumbprint
+                };
+                err.NeighborThumbprints.AddRange(neighbors.Select(n => ByteString.CopyFrom([.. n])));
+
+                var directedMessage = nodeContext.PrepareDirectedMessage(IdentityPublicKeyThumbprint.Value, err);
+                var output = PrepareEnvelope(nodeContext, directedMessage);
+                await SendEnvelope(nodeContext, output, cancellationToken);
                 return true;
             }
 
-            // Is the signature valid?
-            if (!thumbnailSignatureCache.TryGetValue(CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey))
+            // Is the signature verifiable?
+            if (!isSenderVerifiable)
             {
-                nodeContext.Logger?.LogError("Discarding message with unverifiable signature for unknown thumbprint {Thumbprint}.", CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint));
+                nodeContext.Logger?.LogError("Discarding message signed with unknown signature purportedly from {SourceThumbprint} intended for me.", CryptoUtils.BytesToHex(dm.SrcIdentityThumbprint));
                 return false;
             }
 
-            var sourceVerify = new DilithiumSigner();
-            DilithiumPublicKeyParameters parms = new(DilithiumParameters.Dilithium5, [.. sourceIdentityPublicKey]);
-            sourceVerify.Init(false, parms);
-            var dm_payload = dm.Payload.ToByteArray();
-            if (!sourceVerify.VerifySignature(dm_payload, dm.Signature.ToByteArray()))
+            if (!isSignatureValid)
             {
-                nodeContext.Logger?.LogError("Discarding message with invalid signature for known thumbprint {Thumbprint}.", CryptoUtils.BytesToHex(dm.SrcIdentityPublicKeyThumbprint));
+                nodeContext.Logger?.LogError("Discarding message with invalid signature from {SourceThumbprint} intended for me.", CryptoUtils.BytesToHex(dm.SrcIdentityThumbprint));
                 return false;
             }
 
@@ -419,6 +451,13 @@ internal class Peer : IDisposable
                 case Any any when any.Is(ConsoleAlert.Descriptor):
                     nodeContext.Logger?.LogCritical("CONSOLE ALERT from {PeerShortName} ({RemoteEndPoint}): {Contents}", PeerShortName, RemoteEndPoint, any.Unpack<ConsoleAlert>().Message);
                     break;
+                case Any any when any.Is(ErrorDestinationUnreachable.Descriptor):
+                    {
+                        var err = any.Unpack<ErrorDestinationUnreachable>();
+                        nodeContext.Logger?.LogInformation("ErrorDestinationUnreachable from {PeerShortName} ({RemoteEndPoint}): {NeighborCount} neighbors provided", PeerShortName, RemoteEndPoint, err.NeighborThumbprints.Count);
+                        await nodeContext.WriteLineToUserAsync($"DESTINATION UNREACHABLE FOR {CryptoUtils.BytesToHex(err.UnreachableIdentityThumbprint)} VIA {PeerShortName}", cancellationToken);
+                        break;
+                    }
                 case Any any when any.Is(Ping.Descriptor):
                     var ping = any.Unpack<Ping>();
                     nodeContext.Logger?.LogDebug("PING from {PeerShortName} ({RemoteEndPoint}): {Contents}", PeerShortName, RemoteEndPoint, $"id={ping.Identifier} seq={ping.Sequence}");
@@ -435,9 +474,11 @@ internal class Peer : IDisposable
             }
             return true;
         }
-
-        nodeContext.Logger?.LogError("Unsupported envelope payload received from {PeerShortName} ({RemoteEndPoint}. Closing.", PeerShortName, RemoteEndPoint);
-        return false;
+        else
+        {
+            nodeContext.Logger?.LogError("Unsupported envelope payload received from {PeerShortName} ({RemoteEndPoint}. Closing.", PeerShortName, RemoteEndPoint);
+            return false;
+        }
     }
 
     public void Close() => Client.Close();
@@ -471,7 +512,10 @@ internal class Peer : IDisposable
         };
 
         var envelope_payload_bytes = envelope_payload.ToByteArray();
-        return PrepareEnvelopeInternal(nodeContext, envelope_payload_bytes);
+        var envelope = PrepareEnvelopeInternal(nodeContext, envelope_payload_bytes);
+
+        //MessageUtils.Dump(directedMessage, nodeContext.Logger);
+        return envelope;
     }
 
     private Envelope PrepareEnvelopeInternal(NodeContext nodeContext, byte[] payload)
@@ -535,13 +579,47 @@ internal class Peer : IDisposable
         BytesSent += (ulong)bytes_to_send.Length;
     }
 
-    public async Task SendEnvelope(Envelope envelope, CancellationToken cancellationToken)
+    public async Task<bool> SendEnvelope(NodeContext nodeContext, Envelope envelope, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
         var bytes_to_send = envelope.ToByteArray();
-        await Client.GetStream().WriteAsync(bytes_to_send, cancellationToken);
-        BytesSent += (ulong)bytes_to_send.Length;
+        try
+        {
+            await Client.GetStream().WriteAsync(bytes_to_send, cancellationToken);
+            BytesSent += (ulong)bytes_to_send.Length;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            nodeContext.Logger?.LogError(ex, "Unable to write envelope bytes. Closing.");
+            Client.Close();
+            return false;
+        }
+    }
+
+    public async Task<bool> SendPing(NodeContext nodeContext, ImmutableArray<byte>? targetThumbprint, CancellationToken cancellationToken)
+    {
+        var ping = new Ping
+        {
+            Identifier = 1,
+            Sequence = 1,
+            Payload = ByteString.Empty
+        };
+
+        var ping_destination = targetThumbprint == null ? IdentityPublicKeyThumbprint!.Value : targetThumbprint.Value;
+        var dm = nodeContext.PrepareDirectedMessage(ping_destination, ping);
+        var env = PrepareEnvelope(nodeContext, dm);
+        var success = await SendEnvelope(nodeContext, env, cancellationToken);
+        if (success)
+        {
+            nodeContext.Logger?.LogDebug("PING to {PeerShortName} ({RemoteEndPoint}): {Contents}", PeerShortName, RemoteEndPoint, $"id={ping.Identifier} seq={ping.Sequence}");
+        }
+        else
+        {
+            nodeContext.Logger?.LogError("ERROR sending PING to {PeerShortName} ({RemoteEndPoint})", PeerShortName, RemoteEndPoint);
+        }
+        return success;
     }
 }
 

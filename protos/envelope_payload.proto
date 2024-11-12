@@ -1,12 +1,14 @@
 syntax = "proto3";
 
+import "forwarded_message.proto";
 import "directed_message.proto";
 
 option csharp_namespace = "Luxelot.Messages";
 
 message EnvelopePayload {
-    oneof paylod {
+    oneof payload {
         string error_message = 1;
-        DirectedMessage directed_message = 2;
+        ForwardedMessage forwarded_message = 2;
+        DirectedMessage directed_message = 3;
     }
-}   
+}

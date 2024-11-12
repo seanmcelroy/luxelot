@@ -10,12 +10,19 @@ public readonly struct NodeContext(Node node)
 {
     public required readonly string NodeShortName { get; init; }
     public required readonly ImmutableArray<byte> NodeIdentityKeyPublicBytes { get; init; }
+    public required readonly ImmutableArray<byte> NodeIdentityKeyPublicThumbprint { get; init; }
     public required readonly ILogger? Logger { get; init; }
     private readonly Node _node = node;
+
+    public IEnumerable<ImmutableArray<byte>> GetNeighborThumbprints() => _node.GetNeighborThumbprints();
 
     public DirectedMessage PrepareDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload)
     {
         return _node.PrepareDirectedMessage(destinationIdPubKeyThumbprint, payload);
+    }
+
+    public async Task ForwardDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload) {
+        await _node.ForwardDirectedMessage(destinationIdPubKeyThumbprint, payload);
     }
 
     public async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken)
