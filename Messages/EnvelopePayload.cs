@@ -24,14 +24,15 @@ namespace Luxelot.Messages {
     static EnvelopePayloadReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "ChZlbnZlbG9wZV9wYXlsb2FkLnByb3RvGhdmb3J3YXJkZWRfbWVzc2FnZS5w",
-            "cm90bxoWZGlyZWN0ZWRfbWVzc2FnZS5wcm90byKTAQoPRW52ZWxvcGVQYXls",
-            "b2FkEhcKDWVycm9yX21lc3NhZ2UYASABKAlIABIuChFmb3J3YXJkZWRfbWVz",
-            "c2FnZRgCIAEoCzIRLkZvcndhcmRlZE1lc3NhZ2VIABIsChBkaXJlY3RlZF9t",
-            "ZXNzYWdlGAMgASgLMhAuRGlyZWN0ZWRNZXNzYWdlSABCCQoHcGF5bG9hZEIT",
-            "qgIQTHV4ZWxvdC5NZXNzYWdlc2IGcHJvdG8z"));
+            "ChZlbnZlbG9wZV9wYXlsb2FkLnByb3RvGhNlcnJvcl9tZXNzYWdlLnByb3Rv",
+            "Ghdmb3J3YXJkZWRfbWVzc2FnZS5wcm90bxoWZGlyZWN0ZWRfbWVzc2FnZS5w",
+            "cm90byKiAQoPRW52ZWxvcGVQYXlsb2FkEiYKDWVycm9yX21lc3NhZ2UYASAB",
+            "KAsyDS5FcnJvck1lc3NhZ2VIABIuChFmb3J3YXJkZWRfbWVzc2FnZRgCIAEo",
+            "CzIRLkZvcndhcmRlZE1lc3NhZ2VIABIsChBkaXJlY3RlZF9tZXNzYWdlGAMg",
+            "ASgLMhAuRGlyZWN0ZWRNZXNzYWdlSABCCQoHcGF5bG9hZEITqgIQTHV4ZWxv",
+            "dC5NZXNzYWdlc2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
-          new pbr::FileDescriptor[] { global::Luxelot.Messages.ForwardedMessageReflection.Descriptor, global::Luxelot.Messages.DirectedMessageReflection.Descriptor, },
+          new pbr::FileDescriptor[] { global::Luxelot.Messages.ErrorMessageReflection.Descriptor, global::Luxelot.Messages.ForwardedMessageReflection.Descriptor, global::Luxelot.Messages.DirectedMessageReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.EnvelopePayload), global::Luxelot.Messages.EnvelopePayload.Parser, new[]{ "ErrorMessage", "ForwardedMessage", "DirectedMessage" }, new[]{ "Payload" }, null, null, null)
           }));
@@ -76,7 +77,7 @@ namespace Luxelot.Messages {
     public EnvelopePayload(EnvelopePayload other) : this() {
       switch (other.PayloadCase) {
         case PayloadOneofCase.ErrorMessage:
-          ErrorMessage = other.ErrorMessage;
+          ErrorMessage = other.ErrorMessage.Clone();
           break;
         case PayloadOneofCase.ForwardedMessage:
           ForwardedMessage = other.ForwardedMessage.Clone();
@@ -99,11 +100,11 @@ namespace Luxelot.Messages {
     public const int ErrorMessageFieldNumber = 1;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public string ErrorMessage {
-      get { return payloadCase_ == PayloadOneofCase.ErrorMessage ? (string) payload_ : ""; }
+    public global::Luxelot.Messages.ErrorMessage ErrorMessage {
+      get { return payloadCase_ == PayloadOneofCase.ErrorMessage ? (global::Luxelot.Messages.ErrorMessage) payload_ : null; }
       set {
-        payload_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
-        payloadCase_ = PayloadOneofCase.ErrorMessage;
+        payload_ = value;
+        payloadCase_ = value == null ? PayloadOneofCase.None : PayloadOneofCase.ErrorMessage;
       }
     }
 
@@ -168,7 +169,7 @@ namespace Luxelot.Messages {
       if (ReferenceEquals(other, this)) {
         return true;
       }
-      if (ErrorMessage != other.ErrorMessage) return false;
+      if (!object.Equals(ErrorMessage, other.ErrorMessage)) return false;
       if (!object.Equals(ForwardedMessage, other.ForwardedMessage)) return false;
       if (!object.Equals(DirectedMessage, other.DirectedMessage)) return false;
       if (PayloadCase != other.PayloadCase) return false;
@@ -203,7 +204,7 @@ namespace Luxelot.Messages {
     #else
       if (payloadCase_ == PayloadOneofCase.ErrorMessage) {
         output.WriteRawTag(10);
-        output.WriteString(ErrorMessage);
+        output.WriteMessage(ErrorMessage);
       }
       if (payloadCase_ == PayloadOneofCase.ForwardedMessage) {
         output.WriteRawTag(18);
@@ -225,7 +226,7 @@ namespace Luxelot.Messages {
     void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
       if (payloadCase_ == PayloadOneofCase.ErrorMessage) {
         output.WriteRawTag(10);
-        output.WriteString(ErrorMessage);
+        output.WriteMessage(ErrorMessage);
       }
       if (payloadCase_ == PayloadOneofCase.ForwardedMessage) {
         output.WriteRawTag(18);
@@ -246,7 +247,7 @@ namespace Luxelot.Messages {
     public int CalculateSize() {
       int size = 0;
       if (payloadCase_ == PayloadOneofCase.ErrorMessage) {
-        size += 1 + pb::CodedOutputStream.ComputeStringSize(ErrorMessage);
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(ErrorMessage);
       }
       if (payloadCase_ == PayloadOneofCase.ForwardedMessage) {
         size += 1 + pb::CodedOutputStream.ComputeMessageSize(ForwardedMessage);
@@ -268,7 +269,10 @@ namespace Luxelot.Messages {
       }
       switch (other.PayloadCase) {
         case PayloadOneofCase.ErrorMessage:
-          ErrorMessage = other.ErrorMessage;
+          if (ErrorMessage == null) {
+            ErrorMessage = new global::Luxelot.Messages.ErrorMessage();
+          }
+          ErrorMessage.MergeFrom(other.ErrorMessage);
           break;
         case PayloadOneofCase.ForwardedMessage:
           if (ForwardedMessage == null) {
@@ -300,7 +304,12 @@ namespace Luxelot.Messages {
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
           case 10: {
-            ErrorMessage = input.ReadString();
+            global::Luxelot.Messages.ErrorMessage subBuilder = new global::Luxelot.Messages.ErrorMessage();
+            if (payloadCase_ == PayloadOneofCase.ErrorMessage) {
+              subBuilder.MergeFrom(ErrorMessage);
+            }
+            input.ReadMessage(subBuilder);
+            ErrorMessage = subBuilder;
             break;
           }
           case 18: {
@@ -337,7 +346,12 @@ namespace Luxelot.Messages {
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
           case 10: {
-            ErrorMessage = input.ReadString();
+            global::Luxelot.Messages.ErrorMessage subBuilder = new global::Luxelot.Messages.ErrorMessage();
+            if (payloadCase_ == PayloadOneofCase.ErrorMessage) {
+              subBuilder.MergeFrom(ErrorMessage);
+            }
+            input.ReadMessage(subBuilder);
+            ErrorMessage = subBuilder;
             break;
           }
           case 18: {

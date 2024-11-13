@@ -16,13 +16,16 @@ public readonly struct NodeContext(Node node)
 
     public IEnumerable<ImmutableArray<byte>> GetNeighborThumbprints() => _node.GetNeighborThumbprints();
 
-    public DirectedMessage PrepareDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload)
+    public IMessage? PrepareEnvelopePayload(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload)
     {
-        return _node.PrepareDirectedMessage(destinationIdPubKeyThumbprint, payload);
+        return _node.PrepareEnvelopePayload(destinationIdPubKeyThumbprint, payload);
     }
 
-    public async Task ForwardDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload) {
-        await _node.ForwardDirectedMessage(destinationIdPubKeyThumbprint, payload);
+    public bool RegisterForwardId(UInt64 forwardId) => _node.RegisterForwardId(forwardId);
+
+    public async Task RelayForwardMessage(ForwardedMessage original, ImmutableArray<byte>? excludedNeighbors, CancellationToken cancellationToken)
+    {
+        await _node.RelayForwardMessage(this, original, excludedNeighbors, cancellationToken);
     }
 
     public async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken)

@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Messages";
+
+message ErrorMessage {
+    string message = 1;
+}

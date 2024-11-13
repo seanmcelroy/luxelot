@@ -8,5 +8,6 @@ message ForwardedMessage {
 
     fixed64 forward_id = 1;
     int32 ttl = 2;
-    google.protobuf.Any payload = 3;
+    bytes dst_identity_thumbprint = 3;
+    google.protobuf.Any payload = 4;
 }

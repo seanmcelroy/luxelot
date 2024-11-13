@@ -8,6 +8,7 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
+using Org.BouncyCastle.Bcpg.Sig;
 using Org.BouncyCastle.Crypto;
 
 namespace Luxelot;
@@ -295,8 +296,8 @@ internal class Peer : IDisposable
 
         nodeContext.Logger?.LogDebug("Replying PONG {LocalEndPoint}->{RemoteEndPoint}", LocalEndPoint, RemoteEndPoint);
 
-        var directedMessage = nodeContext.PrepareDirectedMessage(IdentityPublicKeyThumbprint.Value, pong);
-        var envelope = PrepareEnvelope(nodeContext, directedMessage);
+        var msg = nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, pong);
+        var envelope = PrepareEnvelope(nodeContext, msg);
         await SendEnvelope(nodeContext, envelope, cancellationToken);
         return true;
     }
@@ -382,19 +383,44 @@ internal class Peer : IDisposable
             return false;
         }
 
-
-        if (!string.IsNullOrEmpty(envelopePayload.ErrorMessage))
+        if (envelopePayload.ErrorMessage != null)
         {
-            nodeContext.Logger?.LogError("ERROR RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): {ErrorMessage}", PeerShortName, RemoteEndPoint, envelopePayload.ErrorMessage);
+            nodeContext.Logger?.LogError("ERROR RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): {ErrorMessage}", PeerShortName, RemoteEndPoint, envelopePayload.ErrorMessage.Message);
             Client.Close();
             return false;
         }
         else if (envelopePayload.ForwardedMessage != null)
         {
             var fwd = envelopePayload.ForwardedMessage;
+            nodeContext.Logger?.LogDebug("FORWARD FROM {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(fwd.DstIdentityThumbprint), fwd.ForwardId);
 
-            nodeContext.Logger?.LogCritical("FORWARDED MESSAGE RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): ForwardId={ForwardId}", PeerShortName, RemoteEndPoint, fwd.ForwardId);
-            Client.Close();
+            // Have I seen this message before?
+            if (nodeContext.RegisterForwardId(fwd.ForwardId))
+            {
+                nodeContext.Logger?.LogTrace("Peer {PeerShortName} forwarded known message, ignoring: ForwardId={ForwardId}", PeerShortName, fwd.ForwardId);
+                return true;
+            }
+
+            // Is the forwarded message destined for the sender?  That's a boomerang loop, close dumb client.
+            if (fwd.DstIdentityThumbprint.SequenceEqual(IdentityPublicKeyThumbprint.Value)) {
+                nodeContext.Logger?.LogError("Peer {PeerShortName} forwarded message to me destined for itself: ForwardId={ForwardId}", PeerShortName, fwd.ForwardId);
+                Client.Close();
+                return false;
+            }
+
+            // Is the forwarded message destined for a node OTHER THAN me?
+            if (!fwd.DstIdentityThumbprint.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint)) {
+                if (fwd.Ttl <= 1) {
+                    nodeContext.Logger?.LogCritical("Forwarded message TTL via {PeerShortName} has expired: ForwardId={ForwardId}", PeerShortName, fwd.ForwardId);
+                    return true;
+                }
+
+                await nodeContext.RelayForwardMessage(fwd, IdentityPublicKeyThumbprint, cancellationToken);
+                return true;
+            }
+
+            // This is a forwarded message for me.
+            nodeContext.Logger?.LogCritical("FORWARDED MESSAGE RECEIVED VIA {PeerShortName} ({RemoteEndPoint}): ForwardId={ForwardId}", PeerShortName, RemoteEndPoint, fwd.ForwardId);
             return true; // TODO, handle a received message for forwarding.
         }
         else if (envelopePayload.DirectedMessage != null)
@@ -427,9 +453,9 @@ internal class Peer : IDisposable
                 };
                 err.NeighborThumbprints.AddRange(neighbors.Select(n => ByteString.CopyFrom([.. n])));
 
-                var directedMessage = nodeContext.PrepareDirectedMessage(IdentityPublicKeyThumbprint.Value, err);
-                var output = PrepareEnvelope(nodeContext, directedMessage);
-                await SendEnvelope(nodeContext, output, cancellationToken);
+                var err_payload = nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, err);
+                if (err_payload != null)
+                    await SendEnvelope(nodeContext, PrepareEnvelope(nodeContext, err_payload), cancellationToken);
                 return true;
             }
 
@@ -501,27 +527,61 @@ internal class Peer : IDisposable
         disposed = true;
     }
 
-    public Envelope PrepareEnvelope(NodeContext nodeContext, DirectedMessage directedMessage)
+
+    public Envelope PrepareEnvelope(NodeContext nodeContext, IMessage message)
     {
         ArgumentNullException.ThrowIfNull(nodeContext);
-        ArgumentNullException.ThrowIfNull(directedMessage);
+        ArgumentNullException.ThrowIfNull(message);
+        if (message is ErrorMessage em)
+            return PrepareEnvelopeInternal(nodeContext, em: em);
+        if (message is ForwardedMessage fm)
+            return PrepareEnvelopeInternal(nodeContext, fm: fm);
+        if (message is DirectedMessage dm)
+            return PrepareEnvelopeInternal(nodeContext, dm: dm);
 
-        var envelope_payload = new EnvelopePayload
-        {
-            DirectedMessage = directedMessage
-        };
-
-        var envelope_payload_bytes = envelope_payload.ToByteArray();
-        var envelope = PrepareEnvelopeInternal(nodeContext, envelope_payload_bytes);
-
-        //MessageUtils.Dump(directedMessage, nodeContext.Logger);
-        return envelope;
+        nodeContext.Logger?.LogError("Unsupported envelope payload {Type}", message.GetType().FullName);
+        throw new ArgumentException($"Unsupported envelope payload type {message.GetType().FullName}");
     }
 
-    private Envelope PrepareEnvelopeInternal(NodeContext nodeContext, byte[] payload)
+    public Envelope PrepareEnvelope(NodeContext nodeContext, ErrorMessage message)
     {
         ArgumentNullException.ThrowIfNull(nodeContext);
-        ArgumentNullException.ThrowIfNull(payload);
+        ArgumentNullException.ThrowIfNull(message);
+        return PrepareEnvelopeInternal(nodeContext, em: message);
+    }
+
+    public Envelope PrepareEnvelope(NodeContext nodeContext, ForwardedMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(nodeContext);
+        ArgumentNullException.ThrowIfNull(message);
+        return PrepareEnvelopeInternal(nodeContext, fm: message);
+    }
+
+    public Envelope PrepareEnvelope(NodeContext nodeContext, DirectedMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(nodeContext);
+        ArgumentNullException.ThrowIfNull(message);
+        return PrepareEnvelopeInternal(nodeContext, dm: message);
+    }
+
+    private Envelope PrepareEnvelopeInternal(NodeContext nodeContext, ErrorMessage? em = null, ForwardedMessage? fm = null, DirectedMessage? dm = null)
+    {
+        ArgumentNullException.ThrowIfNull(nodeContext);
+
+        var envelope_payload = new EnvelopePayload();
+        if (em != null)
+            envelope_payload.ErrorMessage = em;
+        else if (fm != null)
+            envelope_payload.ForwardedMessage = fm;
+        else if (dm != null)
+            envelope_payload.DirectedMessage = dm;
+        else
+            throw new ArgumentException("Incompatible message type provided for envelope payload", nameof(dm));
+
+        var envelope_payload_bytes = envelope_payload.ToByteArray();
+        if (envelope_payload_bytes == null || envelope_payload_bytes.Length == 0)
+            throw new ArgumentException("Could not serialize envelope payload to byte array");
+
         if (SessionSharedKey == null || SessionSharedKey.Value.Length == 0)
         {
             nodeContext.Logger?.LogError("Session key is not established with peer {PeerShortName} ({RemoteEndPoint})", PeerShortName, RemoteEndPoint);
@@ -529,10 +589,10 @@ internal class Peer : IDisposable
         }
 
         byte[] nonce = new byte[12];
-        byte[] plain_text = payload;
+        byte[] plain_text = envelope_payload_bytes;
         byte[] cipher_text = new byte[plain_text.Length];
         byte[] tag = new byte[16];
-        byte[]? associated_data = null; //new byte[4];
+        byte[]? associated_data = null;
         try
         {
             using ChaCha20Poly1305 cha = new([.. SessionSharedKey.Value]);
@@ -581,6 +641,7 @@ internal class Peer : IDisposable
 
     public async Task<bool> SendEnvelope(NodeContext nodeContext, Envelope envelope, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(nodeContext);
         ArgumentNullException.ThrowIfNull(envelope);
 
         var bytes_to_send = envelope.ToByteArray();
@@ -608,12 +669,20 @@ internal class Peer : IDisposable
         };
 
         var ping_destination = targetThumbprint == null ? IdentityPublicKeyThumbprint!.Value : targetThumbprint.Value;
-        var dm = nodeContext.PrepareDirectedMessage(ping_destination, ping);
-        var env = PrepareEnvelope(nodeContext, dm);
-        var success = await SendEnvelope(nodeContext, env, cancellationToken);
+        var msg = nodeContext.PrepareEnvelopePayload(ping_destination, ping);
+        bool success = msg != null;
         if (success)
         {
-            nodeContext.Logger?.LogDebug("PING to {PeerShortName} ({RemoteEndPoint}): {Contents}", PeerShortName, RemoteEndPoint, $"id={ping.Identifier} seq={ping.Sequence}");
+            var env = PrepareEnvelope(nodeContext, msg!);
+            success = await SendEnvelope(nodeContext, env, cancellationToken);
+        }
+
+        if (success)
+        {
+            if (targetThumbprint == null)
+                nodeContext.Logger?.LogDebug("PING to {PeerShortName} ({RemoteEndPoint}): {Contents}", PeerShortName, RemoteEndPoint, $"id={ping.Identifier} seq={ping.Sequence}");
+            else
+                nodeContext.Logger?.LogDebug("PING to {PeerShortName} ({RemoteEndPoint}) destined for {DestinationThumbprint}: {Contents}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(targetThumbprint.Value), $"id={ping.Identifier} seq={ping.Sequence}");
         }
         else
         {

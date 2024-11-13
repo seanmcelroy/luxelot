@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -28,6 +27,7 @@ public partial class Node
     private readonly ConcurrentDictionary<TaskEntry, Task> Tasks = [];
     private readonly ConcurrentDictionary<EndPoint, Peer> Peers = [];
     private readonly ConcurrentDictionary<string, ImmutableArray<byte>> ThumbnailSignatureCache = [];
+    private readonly ConcurrentDictionary<UInt64, bool> ForwardIds = [];
     internal TcpClient? User;
     private readonly Mutex UserMutex = new();
     private readonly AsymmetricCipherKeyPair IdentityKeys;
@@ -508,7 +508,35 @@ public partial class Node
             Logger.LogError("Dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}!", peer.PeerShortName, peer.RemoteEndPoint);
     }
 
-    public DirectedMessage PrepareDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload)
+    public IMessage? PrepareEnvelopePayload(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage innerPayload)
+    {
+        // Can I send this to a neighboring peer?
+        var direct_peer = Peers.Values.FirstOrDefault(p => p.IdentityPublicKeyThumbprint.HasValue && Enumerable.SequenceEqual(p.IdentityPublicKeyThumbprint.Value, destinationIdPubKeyThumbprint));
+        if (direct_peer != null)
+        {
+            return PrepareDirectedMessage(destinationIdPubKeyThumbprint, innerPayload);
+        }
+        else
+        {
+            byte[] forwardIdBytes = new byte[8];
+            RandomNumberGenerator.Fill(forwardIdBytes);
+            var forwardId = BitConverter.ToUInt64(forwardIdBytes);
+            if (ForwardIds.TryAdd(forwardId, false))
+            {
+                return new ForwardedMessage
+                {
+                    ForwardId = forwardId,
+                    Ttl = 20,
+                    DstIdentityThumbprint = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]),
+                    Payload = Any.Pack(innerPayload)
+                };
+            }
+        }
+
+        return null;
+    }
+
+    private DirectedMessage PrepareDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload)
     {
         ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
         ArgumentNullException.ThrowIfNull(payload);
@@ -535,13 +563,42 @@ public partial class Node
         return dm;
     }
 
-    public async Task ForwardDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload) {
-
-    }
-
     public IEnumerable<ImmutableArray<byte>> GetNeighborThumbprints() =>
         Peers.Where(p => p.Value.IdentityPublicKeyThumbprint != null)
             .Select(p => p.Value.IdentityPublicKeyThumbprint!.Value);
+
+    public bool RegisterForwardId(UInt64 forwardId)
+    {
+        var known = ForwardIds.TryGetValue(forwardId, out bool seenBefore);
+        if (!known)
+            ForwardIds.TryAdd(forwardId, true);
+        else if (!seenBefore)
+            ForwardIds.TryUpdate(forwardId, true, seenBefore);
+        return known && seenBefore;
+    }
+
+    public async Task RelayForwardMessage(NodeContext context, ForwardedMessage original, ImmutableArray<byte>? excludedNeighbor, CancellationToken cancellationToken)
+    {
+
+        var relayed = new ForwardedMessage
+        {
+            ForwardId = original.ForwardId,
+            Ttl = original.Ttl - 1,
+            DstIdentityThumbprint = original.DstIdentityThumbprint,
+            Payload = original.Payload
+        };
+
+        foreach (var peer in Peers.Values)
+        {
+            if (excludedNeighbor != null 
+                && peer.IdentityPublicKeyThumbprint != null 
+                && Enumerable.SequenceEqual(peer.IdentityPublicKeyThumbprint.Value, excludedNeighbor.Value))
+                continue;
+            var envelope = peer.PrepareEnvelope(context, relayed);
+            await peer.SendEnvelope(context, envelope, cancellationToken);
+            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.PeerShortName, peer.RemoteEndPoint, CryptoUtils.BytesToHex([.. relayed.DstIdentityThumbprint]), relayed.ForwardId);
+        }
+    }
 
     [GeneratedRegex("(?:^|\\s)(\\\"(?:[^\\\"])*\\\"|[^\\s]*)")]
     private static partial Regex QuotedWordArrayRegex();
