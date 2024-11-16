@@ -454,23 +454,31 @@ public partial class Node
         {
             case "?":
             case "help":
-                var cmds = new string[] { "node", "peers", "ping" };
+                var cmds = new string[] { "cache", "node", "peers", "ping" };
                 var cmd_string = cmds.Order().Aggregate((c, n) => $"{c}\r\n{n}");
                 await context.WriteLineToUserAsync(cmd_string, cancellationToken);
+                break;
+            case "cache":
+                await context.WriteLineToUserAsync("Thumbprint Cache List", cancellationToken);
+                var thumb_len = ThumbnailSignatureCache.IsEmpty ? 0 : ThumbnailSignatureCache.Keys.Max(p => p.Length);
+                await context.WriteLineToUserAsync($"{"IdPubKeyThumbprint".PadRight(thumb_len)} IdPubKey", cancellationToken);
+
+                foreach (var cache in ThumbnailSignatureCache)
+                {
+                    await context.WriteLineToUserAsync($"{cache.Key} {CryptoUtils.BytesToHex(cache.Value)}", cancellationToken);
+                }
+                await context.WriteLineToUserAsync("End of Thumbprint Cache List", cancellationToken);
                 break;
             case "node":
                 await context.WriteLineToUserAsync($"ID Public Key: {CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
                 break;
             case "peers":
                 await context.WriteLineToUserAsync("Peer List", cancellationToken);
-
                 var rep_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
-
                 await context.WriteLineToUserAsync($"PeerShortName {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint", cancellationToken);
-
                 foreach (var peer in Peers.Values)
                 {
-                    await context.WriteLineToUserAsync($"{peer.PeerShortName.PadRight("PeerShortName".Length)} {(peer.RemoteEndPoint == null ? string.Empty : peer.RemoteEndPoint.ToString()).PadRight(rep_len)} {peer.BytesReceived} {peer.BytesSent} {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}", cancellationToken);
+                    await context.WriteLineToUserAsync($"{peer.PeerShortName.PadRight("PeerShortName".Length)} {(peer.RemoteEndPoint == null ? string.Empty : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived} {peer.BytesSent} {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}", cancellationToken);
                 }
                 await context.WriteLineToUserAsync("End of Peer List", cancellationToken);
                 break;
@@ -495,7 +503,6 @@ public partial class Node
                 Environment.Exit(0);
                 break;
         }
-
     }
 
     private void ShutdownPeer(Peer peer)
@@ -514,21 +521,31 @@ public partial class Node
         var direct_peer = Peers.Values.FirstOrDefault(p => p.IdentityPublicKeyThumbprint.HasValue && Enumerable.SequenceEqual(p.IdentityPublicKeyThumbprint.Value, destinationIdPubKeyThumbprint));
         if (direct_peer != null)
         {
+            // DM
             return PrepareDirectedMessage(destinationIdPubKeyThumbprint, innerPayload);
         }
         else
         {
+            // FWD
             byte[] forwardIdBytes = new byte[8];
             RandomNumberGenerator.Fill(forwardIdBytes);
             var forwardId = BitConverter.ToUInt64(forwardIdBytes);
             if (ForwardIds.TryAdd(forwardId, false))
             {
+                var nodeIdPrivateKey = (DilithiumPrivateKeyParameters)IdentityKeys.Private;
+                var nodeSigner = new DilithiumSigner();
+                nodeSigner.Init(true, nodeIdPrivateKey);
+                var packed_payload = Any.Pack(innerPayload);
+                var signature = nodeSigner.GenerateSignature(packed_payload.ToByteArray());
+
                 return new ForwardedMessage
                 {
                     ForwardId = forwardId,
                     Ttl = 20,
+                    SrcIdentityPubKey = ByteString.CopyFrom([.. IdentityKeyPublicBytes]),
                     DstIdentityThumbprint = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]),
-                    Payload = Any.Pack(innerPayload)
+                    Payload = packed_payload,
+                    Signature = ByteString.CopyFrom(signature)
                 };
             }
         }
@@ -584,8 +601,10 @@ public partial class Node
         {
             ForwardId = original.ForwardId,
             Ttl = original.Ttl - 1,
+            SrcIdentityPubKey = original.SrcIdentityPubKey,
             DstIdentityThumbprint = original.DstIdentityThumbprint,
-            Payload = original.Payload
+            Payload = original.Payload,
+            Signature = original.Signature,
         };
 
         foreach (var peer in Peers.Values)

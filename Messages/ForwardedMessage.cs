@@ -25,14 +25,15 @@ namespace Luxelot.Messages {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
             "Chdmb3J3YXJkZWRfbWVzc2FnZS5wcm90bxoZZ29vZ2xlL3Byb3RvYnVmL2Fu",
-            "eS5wcm90byJ7ChBGb3J3YXJkZWRNZXNzYWdlEhIKCmZvcndhcmRfaWQYASAB",
-            "KAYSCwoDdHRsGAIgASgFEh8KF2RzdF9pZGVudGl0eV90aHVtYnByaW50GAMg",
-            "ASgMEiUKB3BheWxvYWQYBCABKAsyFC5nb29nbGUucHJvdG9idWYuQW55QhOq",
-            "AhBMdXhlbG90Lk1lc3NhZ2VzYgZwcm90bzM="));
+            "eS5wcm90byKsAQoQRm9yd2FyZGVkTWVzc2FnZRISCgpmb3J3YXJkX2lkGAEg",
+            "ASgGEgsKA3R0bBgCIAEoBRIcChRzcmNfaWRlbnRpdHlfcHViX2tleRgDIAEo",
+            "DBIfChdkc3RfaWRlbnRpdHlfdGh1bWJwcmludBgEIAEoDBIlCgdwYXlsb2Fk",
+            "GAUgASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueRIRCglzaWduYXR1cmUYBiAB",
+            "KAxCE6oCEEx1eGVsb3QuTWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { global::Google.Protobuf.WellKnownTypes.AnyReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.ForwardedMessage), global::Luxelot.Messages.ForwardedMessage.Parser, new[]{ "ForwardId", "Ttl", "DstIdentityThumbprint", "Payload" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.ForwardedMessage), global::Luxelot.Messages.ForwardedMessage.Parser, new[]{ "ForwardId", "Ttl", "SrcIdentityPubKey", "DstIdentityThumbprint", "Payload", "Signature" }, null, null, null, null)
           }));
     }
     #endregion
@@ -75,8 +76,10 @@ namespace Luxelot.Messages {
     public ForwardedMessage(ForwardedMessage other) : this() {
       forwardId_ = other.forwardId_;
       ttl_ = other.ttl_;
+      srcIdentityPubKey_ = other.srcIdentityPubKey_;
       dstIdentityThumbprint_ = other.dstIdentityThumbprint_;
       payload_ = other.payload_ != null ? other.payload_.Clone() : null;
+      signature_ = other.signature_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -110,8 +113,20 @@ namespace Luxelot.Messages {
       }
     }
 
+    /// <summary>Field number for the "src_identity_pub_key" field.</summary>
+    public const int SrcIdentityPubKeyFieldNumber = 3;
+    private pb::ByteString srcIdentityPubKey_ = pb::ByteString.Empty;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public pb::ByteString SrcIdentityPubKey {
+      get { return srcIdentityPubKey_; }
+      set {
+        srcIdentityPubKey_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
     /// <summary>Field number for the "dst_identity_thumbprint" field.</summary>
-    public const int DstIdentityThumbprintFieldNumber = 3;
+    public const int DstIdentityThumbprintFieldNumber = 4;
     private pb::ByteString dstIdentityThumbprint_ = pb::ByteString.Empty;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -123,7 +138,7 @@ namespace Luxelot.Messages {
     }
 
     /// <summary>Field number for the "payload" field.</summary>
-    public const int PayloadFieldNumber = 4;
+    public const int PayloadFieldNumber = 5;
     private global::Google.Protobuf.WellKnownTypes.Any payload_;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -131,6 +146,18 @@ namespace Luxelot.Messages {
       get { return payload_; }
       set {
         payload_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "signature" field.</summary>
+    public const int SignatureFieldNumber = 6;
+    private pb::ByteString signature_ = pb::ByteString.Empty;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public pb::ByteString Signature {
+      get { return signature_; }
+      set {
+        signature_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
       }
     }
 
@@ -151,8 +178,10 @@ namespace Luxelot.Messages {
       }
       if (ForwardId != other.ForwardId) return false;
       if (Ttl != other.Ttl) return false;
+      if (SrcIdentityPubKey != other.SrcIdentityPubKey) return false;
       if (DstIdentityThumbprint != other.DstIdentityThumbprint) return false;
       if (!object.Equals(Payload, other.Payload)) return false;
+      if (Signature != other.Signature) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -162,8 +191,10 @@ namespace Luxelot.Messages {
       int hash = 1;
       if (ForwardId != 0UL) hash ^= ForwardId.GetHashCode();
       if (Ttl != 0) hash ^= Ttl.GetHashCode();
+      if (SrcIdentityPubKey.Length != 0) hash ^= SrcIdentityPubKey.GetHashCode();
       if (DstIdentityThumbprint.Length != 0) hash ^= DstIdentityThumbprint.GetHashCode();
       if (payload_ != null) hash ^= Payload.GetHashCode();
+      if (Signature.Length != 0) hash ^= Signature.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -190,13 +221,21 @@ namespace Luxelot.Messages {
         output.WriteRawTag(16);
         output.WriteInt32(Ttl);
       }
-      if (DstIdentityThumbprint.Length != 0) {
+      if (SrcIdentityPubKey.Length != 0) {
         output.WriteRawTag(26);
+        output.WriteBytes(SrcIdentityPubKey);
+      }
+      if (DstIdentityThumbprint.Length != 0) {
+        output.WriteRawTag(34);
         output.WriteBytes(DstIdentityThumbprint);
       }
       if (payload_ != null) {
-        output.WriteRawTag(34);
+        output.WriteRawTag(42);
         output.WriteMessage(Payload);
+      }
+      if (Signature.Length != 0) {
+        output.WriteRawTag(50);
+        output.WriteBytes(Signature);
       }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
@@ -216,13 +255,21 @@ namespace Luxelot.Messages {
         output.WriteRawTag(16);
         output.WriteInt32(Ttl);
       }
-      if (DstIdentityThumbprint.Length != 0) {
+      if (SrcIdentityPubKey.Length != 0) {
         output.WriteRawTag(26);
+        output.WriteBytes(SrcIdentityPubKey);
+      }
+      if (DstIdentityThumbprint.Length != 0) {
+        output.WriteRawTag(34);
         output.WriteBytes(DstIdentityThumbprint);
       }
       if (payload_ != null) {
-        output.WriteRawTag(34);
+        output.WriteRawTag(42);
         output.WriteMessage(Payload);
+      }
+      if (Signature.Length != 0) {
+        output.WriteRawTag(50);
+        output.WriteBytes(Signature);
       }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
@@ -240,11 +287,17 @@ namespace Luxelot.Messages {
       if (Ttl != 0) {
         size += 1 + pb::CodedOutputStream.ComputeInt32Size(Ttl);
       }
+      if (SrcIdentityPubKey.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeBytesSize(SrcIdentityPubKey);
+      }
       if (DstIdentityThumbprint.Length != 0) {
         size += 1 + pb::CodedOutputStream.ComputeBytesSize(DstIdentityThumbprint);
       }
       if (payload_ != null) {
         size += 1 + pb::CodedOutputStream.ComputeMessageSize(Payload);
+      }
+      if (Signature.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeBytesSize(Signature);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -264,6 +317,9 @@ namespace Luxelot.Messages {
       if (other.Ttl != 0) {
         Ttl = other.Ttl;
       }
+      if (other.SrcIdentityPubKey.Length != 0) {
+        SrcIdentityPubKey = other.SrcIdentityPubKey;
+      }
       if (other.DstIdentityThumbprint.Length != 0) {
         DstIdentityThumbprint = other.DstIdentityThumbprint;
       }
@@ -272,6 +328,9 @@ namespace Luxelot.Messages {
           Payload = new global::Google.Protobuf.WellKnownTypes.Any();
         }
         Payload.MergeFrom(other.Payload);
+      }
+      if (other.Signature.Length != 0) {
+        Signature = other.Signature;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -297,14 +356,22 @@ namespace Luxelot.Messages {
             break;
           }
           case 26: {
-            DstIdentityThumbprint = input.ReadBytes();
+            SrcIdentityPubKey = input.ReadBytes();
             break;
           }
           case 34: {
+            DstIdentityThumbprint = input.ReadBytes();
+            break;
+          }
+          case 42: {
             if (payload_ == null) {
               Payload = new global::Google.Protobuf.WellKnownTypes.Any();
             }
             input.ReadMessage(Payload);
+            break;
+          }
+          case 50: {
+            Signature = input.ReadBytes();
             break;
           }
         }
@@ -331,14 +398,22 @@ namespace Luxelot.Messages {
             break;
           }
           case 26: {
-            DstIdentityThumbprint = input.ReadBytes();
+            SrcIdentityPubKey = input.ReadBytes();
             break;
           }
           case 34: {
+            DstIdentityThumbprint = input.ReadBytes();
+            break;
+          }
+          case 42: {
             if (payload_ == null) {
               Payload = new global::Google.Protobuf.WellKnownTypes.Any();
             }
             input.ReadMessage(Payload);
+            break;
+          }
+          case 50: {
+            Signature = input.ReadBytes();
             break;
           }
         }
