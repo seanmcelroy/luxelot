@@ -271,7 +271,7 @@ public partial class Node
                 {
                     Logger.LogDebug("New peer connection from {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint);
                     var peer = Peer.CreatePeerFromAccept(peerTcpClient, Logger);
-                    var added = Peers.TryAdd(peer.RemoteEndPoint!, peer);
+                    _ = Peers.TryAdd(peer.RemoteEndPoint!, peer);
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
                     {
                         var shutdown = !await peer.HandleSyn(context, cancellationToken);
@@ -341,9 +341,7 @@ public partial class Node
             {
                 foreach (var endpoint in Phonebook)
                 {
-                    TcpClient peerTcpClient = new();
-                    await peerTcpClient.ConnectAsync(endpoint, cancellationToken);
-                    var peer = Peer.CreatePeerToConnect(peerTcpClient, Logger);
+                    var peer = await Peer.CreatePeerAndConnect(endpoint, Logger, cancellationToken);
                     var added = Peers.TryAdd(peer.RemoteEndPoint!, peer);
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(context, peer, cancellationToken), cancellationToken));
                 }
@@ -416,7 +414,7 @@ public partial class Node
                     ThumbnailSignatureCache.TryAdd(CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
 
                     // Okay, we made it!
-                    Logger.LogDebug("Sending test message to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.PeerShortName, peer.RemoteEndPoint, CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
+                    Logger.LogDebug("Sending test message to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
 
                     var payload = new ConsoleAlert
                     {
@@ -430,8 +428,8 @@ public partial class Node
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", peer.PeerShortName, peer.RemoteEndPoint);
-                        peer.Close();
+                        Logger.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", peer.ShortName, peer.RemoteEndPoint);
+                        peer.CloseInternal();
                         Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                     }
                 }
@@ -454,41 +452,65 @@ public partial class Node
         {
             case "?":
             case "help":
-                var cmds = new string[] { "cache", "node", "peers", "ping" };
+                var cmds = new string[] { "cache", "close", "node", "peers", "ping" };
                 var cmd_string = cmds.Order().Aggregate((c, n) => $"{c}\r\n{n}");
                 await context.WriteLineToUserAsync(cmd_string, cancellationToken);
                 break;
-            case "cache":
-                await context.WriteLineToUserAsync("Thumbprint Cache List", cancellationToken);
-                var thumb_len = ThumbnailSignatureCache.IsEmpty ? 0 : ThumbnailSignatureCache.Keys.Max(p => p.Length);
-                await context.WriteLineToUserAsync($"{"IdPubKeyThumbprint".PadRight(thumb_len)} IdPubKey", cancellationToken);
 
-                foreach (var cache in ThumbnailSignatureCache)
+            case "cache":
                 {
-                    await context.WriteLineToUserAsync($"{cache.Key} {CryptoUtils.BytesToHex(cache.Value)}", cancellationToken);
+                    await context.WriteLineToUserAsync("Thumbprint Cache List", cancellationToken);
+                    var thumb_len = ThumbnailSignatureCache.IsEmpty ? 0 : ThumbnailSignatureCache.Keys.Max(p => p.Length);
+                    await context.WriteLineToUserAsync($"{"IdPubKeyThumbprint".PadRight(thumb_len)} IdPubKey", cancellationToken);
+
+                    foreach (var cache in ThumbnailSignatureCache)
+                    {
+                        await context.WriteLineToUserAsync($"{cache.Key} {CryptoUtils.BytesToHex(cache.Value)}", cancellationToken);
+                    }
+                    await context.WriteLineToUserAsync("End of Thumbprint Cache List", cancellationToken);
+                    break;
                 }
-                await context.WriteLineToUserAsync("End of Thumbprint Cache List", cancellationToken);
-                break;
+
+            case "close":
+                {
+                    if (words.Length != 2)
+                        await context.WriteLineToUserAsync($"CLOSE command requires one argument, the peer short name to close.", cancellationToken);
+                    else
+                    {
+                        var peer_to_close = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
+                        if (peer_to_close == null)
+                            await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
+                        else
+                        {
+                            ShutdownPeer(peer_to_close);
+                            await context.WriteLineToUserAsync($"Closed connection to peer {peer_to_close.ShortName}.", cancellationToken);
+                        }
+                    }
+                    break;
+                }
+
             case "node":
                 await context.WriteLineToUserAsync($"ID Public Key: {CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
                 break;
+
             case "peers":
                 await context.WriteLineToUserAsync("Peer List", cancellationToken);
+                var state_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.State.ToString().Length);
                 var rep_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
-                await context.WriteLineToUserAsync($"PeerShortName {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint", cancellationToken);
+                await context.WriteLineToUserAsync($"PeerShortName {"State".PadRight(state_len)} {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint", cancellationToken);
                 foreach (var peer in Peers.Values)
                 {
-                    await context.WriteLineToUserAsync($"{peer.PeerShortName.PadRight("PeerShortName".Length)} {(peer.RemoteEndPoint == null ? string.Empty : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived} {peer.BytesSent} {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}", cancellationToken);
+                    await context.WriteLineToUserAsync($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived} {peer.BytesSent} {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}", cancellationToken);
                 }
                 await context.WriteLineToUserAsync("End of Peer List", cancellationToken);
                 break;
 
             case "ping":
                 if (words.Length != 2 && words.Length != 3)
-                    await context.WriteLineToUserAsync($"PING command requires one or two arguments, the peer name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
+                    await context.WriteLineToUserAsync($"PING command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
                 else
                 {
-                    var peer_to_ping = Peers.Values.FirstOrDefault(p => string.Compare(p.PeerShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
+                    var peer_to_ping = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
                     if (peer_to_ping == null)
                         await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
                     else
@@ -509,14 +531,20 @@ public partial class Node
     {
         ArgumentNullException.ThrowIfNull(peer);
 
-        if (peer.RemoteEndPoint != null && Peers.TryRemove(new KeyValuePair<EndPoint, Peer>(peer.RemoteEndPoint, peer)))
-            Logger.LogDebug("Removed dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}", peer.PeerShortName, peer.RemoteEndPoint);
+        var remoteEndPoint = peer.RemoteEndPoint; // Save before CloseInternal clears this.
+        peer.CloseInternal();
+
+        if (remoteEndPoint != null && Peers.TryRemove(new KeyValuePair<EndPoint, Peer>(remoteEndPoint, peer)))
+            Logger.LogDebug("Removed dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}", peer.ShortName, remoteEndPoint);
         else
-            Logger.LogError("Dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}!", peer.PeerShortName, peer.RemoteEndPoint);
+            Logger.LogError("Dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}!", peer.ShortName, remoteEndPoint);
     }
 
     public IMessage? PrepareEnvelopePayload(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage innerPayload)
     {
+        ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
+        ArgumentNullException.ThrowIfNull(innerPayload);
+
         // Can I send this to a neighboring peer?
         var direct_peer = Peers.Values.FirstOrDefault(p => p.IdentityPublicKeyThumbprint.HasValue && Enumerable.SequenceEqual(p.IdentityPublicKeyThumbprint.Value, destinationIdPubKeyThumbprint));
         if (direct_peer != null)
@@ -609,13 +637,13 @@ public partial class Node
 
         foreach (var peer in Peers.Values)
         {
-            if (excludedNeighbor != null 
-                && peer.IdentityPublicKeyThumbprint != null 
+            if (excludedNeighbor != null
+                && peer.IdentityPublicKeyThumbprint != null
                 && Enumerable.SequenceEqual(peer.IdentityPublicKeyThumbprint.Value, excludedNeighbor.Value))
                 continue;
             var envelope = peer.PrepareEnvelope(context, relayed);
             await peer.SendEnvelope(context, envelope, cancellationToken);
-            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.PeerShortName, peer.RemoteEndPoint, CryptoUtils.BytesToHex([.. relayed.DstIdentityThumbprint]), relayed.ForwardId);
+            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, CryptoUtils.BytesToHex([.. relayed.DstIdentityThumbprint]), relayed.ForwardId);
         }
     }
 
