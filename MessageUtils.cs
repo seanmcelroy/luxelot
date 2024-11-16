@@ -6,6 +6,10 @@ namespace Luxelot;
 
 public static class MessageUtils
 {
+    public const int THUMBPRINT_LEN = 32;
+    public const int KYBER_PUBLIC_KEY_LEN = 2592;
+    public const int DILITHIUM_SIG_LEN = 4627;
+
     public static void Dump(this Envelope envelope, ILogger? logger = null)
     {
         logger?.LogTrace(
@@ -41,4 +45,23 @@ public static class MessageUtils
             $"\r\nsigSHA256={CryptoUtils.BytesToHex(SHA256.HashData(dm.Signature.ToByteArray()))}");
     }
 
+    public static bool IsValid(this ForwardedMessage fwd, ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(fwd);
+
+        if (fwd.Ttl < 0)
+        {
+            logger?.LogWarning("Forwarded message TTL has expired: ForwardId={ForwardId}", fwd.ForwardId);
+            return false;
+        }
+
+        if (fwd.SrcIdentityPubKey == null || fwd.SrcIdentityPubKey.Length != KYBER_PUBLIC_KEY_LEN)
+            return false;
+        if (fwd.DstIdentityThumbprint == null || fwd.DstIdentityThumbprint.Length != THUMBPRINT_LEN)
+            return false;
+        if (fwd.Signature == null || fwd.Signature.Length != DILITHIUM_SIG_LEN)
+            return false;
+
+        return true;
+    }
 }

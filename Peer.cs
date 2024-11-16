@@ -239,6 +239,13 @@ internal class Peer : IDisposable
         else if (envelopePayload.ForwardedMessage != null)
         {
             var fwd = envelopePayload.ForwardedMessage;
+
+            if (!fwd.IsValid())
+            {
+                nodeContext.Logger?.LogTrace("Peer {PeerShortName} forwarded invalid forward message, ignoring: ForwardId={ForwardId}", ShortName, fwd.ForwardId);
+                return true;
+            }
+
             nodeContext.Logger?.LogDebug("FORWARD FROM {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", ShortName, RemoteEndPoint, CryptoUtils.BytesToHex(fwd.DstIdentityThumbprint), fwd.ForwardId);
 
             // Have I seen this message before?
@@ -389,7 +396,7 @@ internal class Peer : IDisposable
 
             var err_payload = IdentityPublicKeyThumbprint == null
                 ? null
-                : nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, err);
+                : nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, [.. dm.SrcIdentityThumbprint.ToByteArray()], err);
             if (err_payload != null)
                 await SendEnvelope(nodeContext, PrepareEnvelope(nodeContext, err_payload), cancellationToken);
             return true;
@@ -516,7 +523,7 @@ internal class Peer : IDisposable
                 Client.Close();
                 return false;
             }
-            if (ack.IdPubKey == null || ack.IdPubKey.Length != 2592)
+            if (ack.IdPubKey == null || ack.IdPubKey.Length != MessageUtils.KYBER_PUBLIC_KEY_LEN)
             {
                 nodeContext.Logger?.LogError("Invalid Ack (IdPubKey) from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
                 Client.Close();
@@ -578,6 +585,9 @@ internal class Peer : IDisposable
         ArgumentNullException.ThrowIfNull(verifiedSourceIdentityPubKey);
         ArgumentNullException.ThrowIfNull(ping);
 
+        if (IdentityPublicKeyThumbprint == null)
+            throw new InvalidOperationException("Attempted to handle a ping from a peer for which we have no identity thumbprint profiled.");
+
         var pong = new Pong
         {
             Identifier = ping.Identifier,
@@ -588,7 +598,7 @@ internal class Peer : IDisposable
         nodeContext.Logger?.LogDebug("Replying PONG {LocalEndPoint}->{RemoteEndPoint}", LocalEndPoint, RemoteEndPoint);
 
         var returnThumbprint = SHA256.HashData([.. verifiedSourceIdentityPubKey]);
-        var msg = nodeContext.PrepareEnvelopePayload([.. returnThumbprint], pong);
+        var msg = nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, [.. returnThumbprint], pong);
         if (msg == null)
         {
             nodeContext.Logger?.LogError("Unknown error preparing PONG envelope; aborting response.");
@@ -768,6 +778,9 @@ internal class Peer : IDisposable
 
     public async Task<bool> SendPing(NodeContext nodeContext, ImmutableArray<byte>? targetThumbprint, CancellationToken cancellationToken)
     {
+        if (IdentityPublicKeyThumbprint == null)
+            throw new InvalidOperationException("Attempted to send a ping to a peer for which we have no identity thumbprint profiled.");
+
         var ping = new Ping
         {
             Identifier = 1,
@@ -776,7 +789,7 @@ internal class Peer : IDisposable
         };
 
         var ping_destination = targetThumbprint == null ? IdentityPublicKeyThumbprint!.Value : targetThumbprint.Value;
-        var msg = nodeContext.PrepareEnvelopePayload(ping_destination, ping);
+        var msg = nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, ping_destination, ping);
         bool success = msg != null;
         if (success)
         {

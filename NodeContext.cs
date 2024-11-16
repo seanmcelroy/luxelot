@@ -16,16 +16,28 @@ public readonly struct NodeContext(Node node)
 
     public IEnumerable<ImmutableArray<byte>> GetNeighborThumbprints() => _node.GetNeighborThumbprints();
 
-    public IMessage? PrepareEnvelopePayload(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload)
+    public IMessage? PrepareEnvelopePayload(
+        ImmutableArray<byte> routingPeerThumbprint,
+        ImmutableArray<byte> ultimateDestinationThumbprint,
+        IMessage innerPayload)
     {
-        return _node.PrepareEnvelopePayload(destinationIdPubKeyThumbprint, payload);
+        ArgumentNullException.ThrowIfNull(routingPeerThumbprint);
+        ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
+        ArgumentNullException.ThrowIfNull(innerPayload);
+
+        return _node.PrepareEnvelopePayload(routingPeerThumbprint, ultimateDestinationThumbprint, innerPayload);
     }
 
     public bool RegisterForwardId(UInt64 forwardId) => _node.RegisterForwardId(forwardId);
 
-    public async Task RelayForwardMessage(ForwardedMessage original, ImmutableArray<byte>? excludedNeighbors, CancellationToken cancellationToken)
+    public async Task RelayForwardMessage(ForwardedMessage original, ImmutableArray<byte>? excludedNeighborThumbprint, CancellationToken cancellationToken)
     {
-        await _node.RelayForwardMessage(this, original, excludedNeighbors, cancellationToken);
+        ArgumentNullException.ThrowIfNull(original);
+
+        if (excludedNeighborThumbprint != null && excludedNeighborThumbprint.Value.Length != MessageUtils.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(excludedNeighborThumbprint), $"Thumbprints must be {MessageUtils.THUMBPRINT_LEN} bytes, but the one provided was {excludedNeighborThumbprint.Value.Length} bytes");
+
+        await _node.RelayForwardMessage(this, original, excludedNeighborThumbprint, cancellationToken);
     }
 
     public async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken)

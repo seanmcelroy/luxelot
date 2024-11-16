@@ -452,7 +452,7 @@ public partial class Node
         {
             case "?":
             case "help":
-                var cmds = new string[] { "cache", "close", "node", "peers", "ping" };
+                var cmds = new string[] { "cache", "close", "connect", "node", "peers", "ping" };
                 var cmd_string = cmds.Order().Aggregate((c, n) => $"{c}\r\n{n}");
                 await context.WriteLineToUserAsync(cmd_string, cancellationToken);
                 break;
@@ -474,24 +474,47 @@ public partial class Node
             case "close":
                 {
                     if (words.Length != 2)
-                        await context.WriteLineToUserAsync($"CLOSE command requires one argument, the peer short name to close.", cancellationToken);
-                    else
                     {
-                        var peer_to_close = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
-                        if (peer_to_close == null)
-                            await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
-                        else
-                        {
-                            ShutdownPeer(peer_to_close);
-                            await context.WriteLineToUserAsync($"Closed connection to peer {peer_to_close.ShortName}.", cancellationToken);
-                        }
+                        await context.WriteLineToUserAsync($"CLOSE command requires one argument, the peer short name to close.", cancellationToken);
+                        return;
                     }
+
+                    var peer_to_close = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
+                    if (peer_to_close == null)
+                    {
+                        await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
+                        return;
+                    }
+
+                    ShutdownPeer(peer_to_close);
+                    await context.WriteLineToUserAsync($"Closed connection to peer {peer_to_close.ShortName}.", cancellationToken);
+                    break;
+                }
+
+            case "connect":
+                {
+                    if (words.Length != 2)
+                    {
+                        await context.WriteLineToUserAsync($"CONNECT command requires one argument, the remote endpoint in the format ADDRESS:PORT", cancellationToken);
+                        return;
+                    }
+
+                    if (!IPEndPoint.TryParse(words[1], out IPEndPoint? remoteEndpoint))
+                    {
+                        await context.WriteLineToUserAsync($"Cannot parse '' as an IP endpoint in the format ADDRESS:PORT.  Did you provide an IPv6 address and forget to put it brackets?", cancellationToken);
+                        return;
+                    }
+
+                    var peer = await Peer.CreatePeerAndConnect(remoteEndpoint, Logger, cancellationToken);
+                    var added = Peers.TryAdd(peer.RemoteEndPoint!, peer);
+                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(context, peer, cancellationToken), cancellationToken));
+                    await context.WriteLineToUserAsync($"New peer created.", cancellationToken);
                     break;
                 }
 
             case "node":
                 await context.WriteLineToUserAsync($"ID Public Key: {CryptoUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
-                break;
+                return;
 
             case "peers":
                 await context.WriteLineToUserAsync("Peer List", cancellationToken);
@@ -500,25 +523,37 @@ public partial class Node
                 await context.WriteLineToUserAsync($"PeerShortName {"State".PadRight(state_len)} {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint", cancellationToken);
                 foreach (var peer in Peers.Values)
                 {
-                    await context.WriteLineToUserAsync($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived} {peer.BytesSent} {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}", cancellationToken);
+                    await context.WriteLineToUserAsync($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State.ToString().PadRight(state_len)} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived} {peer.BytesSent} {CryptoUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}", cancellationToken);
                 }
                 await context.WriteLineToUserAsync("End of Peer List", cancellationToken);
                 break;
 
             case "ping":
                 if (words.Length != 2 && words.Length != 3)
-                    await context.WriteLineToUserAsync($"PING command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
-                else
                 {
-                    var peer_to_ping = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
-                    if (peer_to_ping == null)
-                        await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
-                    else
+                    await context.WriteLineToUserAsync($"PING command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
+                    return;
+                }
+
+                var peer_to_ping = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
+                if (peer_to_ping == null)
+                {
+                    await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
+                    return;
+                }
+
+                ImmutableArray<byte>? ping_target = null;
+                if (words.Length == 3)
+                {
+                    ping_target = [.. CryptoUtils.HexToBytes(words[2])];
+                    if (ping_target.Value.Length != MessageUtils.THUMBPRINT_LEN)
                     {
-                        ImmutableArray<byte>? ping_target = words.Length == 2 ? null : [.. CryptoUtils.HexToBytes(words[2])];
-                        var success = await peer_to_ping.SendPing(context, ping_target, cancellationToken);
+                        await context.WriteLineToUserAsync($"Invalid THUMBPRINT for the intended recipient.  Thumbprints are {MessageUtils.THUMBPRINT_LEN} bytes.", cancellationToken);
+                        return;
                     }
                 }
+
+                var success = await peer_to_ping.SendPing(context, ping_target, cancellationToken);
                 break;
 
             case "shutdown":
@@ -540,17 +575,30 @@ public partial class Node
             Logger.LogError("Dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}!", peer.ShortName, remoteEndPoint);
     }
 
-    public IMessage? PrepareEnvelopePayload(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage innerPayload)
+    public IMessage? PrepareEnvelopePayload(
+        ImmutableArray<byte> routingPeerThumbprint,
+        ImmutableArray<byte> ultimateDestinationThumbprint,
+        IMessage innerPayload)
     {
-        ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
+        ArgumentNullException.ThrowIfNull(routingPeerThumbprint);
+        ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(innerPayload);
 
-        // Can I send this to a neighboring peer?
-        var direct_peer = Peers.Values.FirstOrDefault(p => p.IdentityPublicKeyThumbprint.HasValue && Enumerable.SequenceEqual(p.IdentityPublicKeyThumbprint.Value, destinationIdPubKeyThumbprint));
+        if (routingPeerThumbprint.Length != MessageUtils.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(routingPeerThumbprint), $"Thumbprints must be {MessageUtils.THUMBPRINT_LEN} bytes, but the one provided was {routingPeerThumbprint.Length} bytes");
+        if (ultimateDestinationThumbprint.Length != MessageUtils.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprints must be {MessageUtils.THUMBPRINT_LEN} bytes, but the one provided was {ultimateDestinationThumbprint.Length} bytes");
+
+        // Can I send this to a neighboring peer? (the answer is always know if routing != ultimate for source routed outbound)
+        var direct_peer = !Enumerable.SequenceEqual(routingPeerThumbprint, ultimateDestinationThumbprint)
+            ? null
+            : Peers.Values
+                .FirstOrDefault(p => p.IdentityPublicKeyThumbprint.HasValue 
+                && Enumerable.SequenceEqual(p.IdentityPublicKeyThumbprint.Value, ultimateDestinationThumbprint));
         if (direct_peer != null)
         {
             // DM
-            return PrepareDirectedMessage(destinationIdPubKeyThumbprint, innerPayload);
+            return PrepareDirectedMessage(routingPeerThumbprint, innerPayload);
         }
         else
         {
@@ -571,7 +619,7 @@ public partial class Node
                     ForwardId = forwardId,
                     Ttl = 20,
                     SrcIdentityPubKey = ByteString.CopyFrom([.. IdentityKeyPublicBytes]),
-                    DstIdentityThumbprint = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]),
+                    DstIdentityThumbprint = ByteString.CopyFrom([.. ultimateDestinationThumbprint]),
                     Payload = packed_payload,
                     Signature = ByteString.CopyFrom(signature)
                 };
@@ -585,6 +633,11 @@ public partial class Node
     {
         ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
         ArgumentNullException.ThrowIfNull(payload);
+
+        if (destinationIdPubKeyThumbprint.Length != MessageUtils.THUMBPRINT_LEN)
+        {
+            throw new ArgumentOutOfRangeException(nameof(destinationIdPubKeyThumbprint), $"Thumbprints must be {MessageUtils.THUMBPRINT_LEN} bytes, but the one provided was {destinationIdPubKeyThumbprint.Length} bytes");
+        }
 
         if (Enumerable.SequenceEqual(destinationIdPubKeyThumbprint, IdentityKeyPublicThumbprint))
             throw new ArgumentException("Attempted to prepare direct messages to my own node", nameof(destinationIdPubKeyThumbprint));
@@ -622,8 +675,13 @@ public partial class Node
         return known && seenBefore;
     }
 
-    public async Task RelayForwardMessage(NodeContext context, ForwardedMessage original, ImmutableArray<byte>? excludedNeighbor, CancellationToken cancellationToken)
+    public async Task RelayForwardMessage(NodeContext context, ForwardedMessage original, ImmutableArray<byte>? excludedNeighborThumbprint, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(original);
+
+        if (excludedNeighborThumbprint != null && excludedNeighborThumbprint.Value.Length != MessageUtils.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(excludedNeighborThumbprint), $"Thumbprints must be {MessageUtils.THUMBPRINT_LEN} bytes, but the one provided was {excludedNeighborThumbprint.Value.Length} bytes");
 
         var relayed = new ForwardedMessage
         {
@@ -637,9 +695,9 @@ public partial class Node
 
         foreach (var peer in Peers.Values)
         {
-            if (excludedNeighbor != null
+            if (excludedNeighborThumbprint != null
                 && peer.IdentityPublicKeyThumbprint != null
-                && Enumerable.SequenceEqual(peer.IdentityPublicKeyThumbprint.Value, excludedNeighbor.Value))
+                && Enumerable.SequenceEqual(peer.IdentityPublicKeyThumbprint.Value, excludedNeighborThumbprint.Value))
                 continue;
             var envelope = peer.PrepareEnvelope(context, relayed);
             await peer.SendEnvelope(context, envelope, cancellationToken);
