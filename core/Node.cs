@@ -21,7 +21,7 @@ namespace Luxelot;
 
 public partial class Node
 {
-    public const uint PROTOCOL_VERSION = 1;
+    public const uint NODE_PROTOCOL_VERSION = 1;
 
     private readonly ILogger Logger;
     public required int PeerPort { get; init; }
@@ -50,6 +50,7 @@ public partial class Node
     // Plug-ins
     readonly List<IServerApp> ServerApps = [];
     readonly List<IConsoleCommand> ConsoleCommands = [];
+    //readonly List<IClientApp> ClientApps = [];
 
 
     public Node(ILoggerFactory loggerFactory, string? shortName)
@@ -275,8 +276,28 @@ public partial class Node
                 }
 
                 ConsoleCommands.Add(consoleCommand);
+                consoleCommand.OnInitialize(appContext);
                 Logger.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
             }
+
+            /*/ Load Client Apps
+            var clientAppTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IClientApp).FullName) == 0)).ToArray();
+            foreach (var clientAppType in clientAppTypes)
+            {
+                var objApp = Activator.CreateInstance(clientAppType, true);
+#pragma warning disable IDE0019 // Use pattern matching
+                var clientApp = objApp as IClientApp;
+#pragma warning restore IDE0019 // Use pattern matching
+                if (clientApp == null)
+                {
+                    Logger.LogError("Unable to load client app {TypeName}", clientAppType.FullName);
+                    continue;
+                }
+
+                clientApp.OnNodeInitialize(appContext);
+                ClientApps.Add(clientApp);
+                Logger.LogInformation("Loaded client app {AppName} ({TypeName})", clientApp.Name, clientAppType.FullName);
+            }*/
         }
     }
 
@@ -559,17 +580,19 @@ public partial class Node
         {
             case "?":
             case "help":
-                var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers" };
+                await context.WriteLineToUserAsync("\r\nCommand List", cancellationToken);
+                var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers", "shutdown" };
                 var cmd_string = built_in_cmds
                     .Union(ConsoleCommands.Select(cc => cc.Command.ToLowerInvariant()).ToArray())
                     .Order()
                     .Aggregate((c, n) => $"{c}\r\n{n}");
                 await context.WriteLineToUserAsync(cmd_string, cancellationToken);
+                await context.WriteLineToUserAsync("End of Command List", cancellationToken);
                 break;
 
             case "cache":
                 {
-                    await context.WriteLineToUserAsync("Thumbprint Cache List", cancellationToken);
+                    await context.WriteLineToUserAsync("\r\nThumbprint Cache List", cancellationToken);
                     var thumb_len = ThumbprintSignatureCache.IsEmpty ? 0 : ThumbprintSignatureCache.Keys.Max(p => p.Length);
                     await context.WriteLineToUserAsync($"{"IdPubKeyThumbprint".PadRight(thumb_len)} IdPubKey", cancellationToken);
 
@@ -630,7 +653,7 @@ public partial class Node
                 return;
 
             case "peers":
-                await context.WriteLineToUserAsync("Peer List", cancellationToken);
+                await context.WriteLineToUserAsync("\r\nPeer List", cancellationToken);
                 var state_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.State.ToString().Length);
                 var rep_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
                 await context.WriteLineToUserAsync($"PeerShortName {"State".PadRight(state_len)} {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint", cancellationToken);
@@ -653,12 +676,7 @@ public partial class Node
                     return;
                 }
 
-                var appContext = new AppContext
-                {
-                    Logger = Logger,
-                    Node = this
-                };
-                var success = await appCommand.Invoke(appContext, words, cancellationToken);
+                var success = await appCommand.Invoke(words, cancellationToken);
                 break;
         }
     }
@@ -735,9 +753,7 @@ public partial class Node
         ArgumentNullException.ThrowIfNull(payload);
 
         if (destinationIdPubKeyThumbprint.Length != Constants.THUMBPRINT_LEN)
-        {
-            throw new ArgumentOutOfRangeException(nameof(destinationIdPubKeyThumbprint), $"Thumbprints must be {Constants.THUMBPRINT_LEN} bytes, but the one provided was {destinationIdPubKeyThumbprint.Length} bytes");
-        }
+            throw new ArgumentOutOfRangeException(nameof(destinationIdPubKeyThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {destinationIdPubKeyThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         if (Enumerable.SequenceEqual(destinationIdPubKeyThumbprint, IdentityKeyPublicThumbprint))
             throw new ArgumentException("Attempted to prepare direct messages to my own node", nameof(destinationIdPubKeyThumbprint));
@@ -795,7 +811,7 @@ public partial class Node
         {
             var envelope = peer.PrepareEnvelope(original, logger);
             await peer.SendEnvelope(envelope, logger, cancellationToken);
-            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex([.. original.DstIdentityThumbprint]), original.ForwardId);
+            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(original.DstIdentityThumbprint), original.ForwardId);
         }
     }
 
@@ -803,6 +819,9 @@ public partial class Node
     {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentNullException.ThrowIfNull(thumbprint);
+
+        if (thumbprint != null && thumbprint.Value.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Value.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         // This cache is keyed by string representations of thumbprints.
         // The cache value is the peer short name
@@ -840,7 +859,7 @@ public partial class Node
                 continue;
             var envelope = peer.PrepareEnvelope(relayed, logger);
             await peer.SendEnvelope(envelope, logger, cancellationToken);
-            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex([.. relayed.DstIdentityThumbprint]), relayed.ForwardId);
+            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(relayed.DstIdentityThumbprint), relayed.ForwardId);
         }
     }
 

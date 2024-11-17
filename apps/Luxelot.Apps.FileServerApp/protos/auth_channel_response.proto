@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Messages";
+
+message AuthChannelResponse {
+    uint32 prot_ver = 1;
+    int32 status = 2;
+    string status_message = 3;
+    bytes cipher_text = 4;
+    bytes id_pub_key = 5;
+}

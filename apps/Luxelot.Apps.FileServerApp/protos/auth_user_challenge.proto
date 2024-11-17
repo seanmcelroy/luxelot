@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Apps.FileServerApp.Messages";
+
+message AuthUserChallenge {
+    bytes principal = 1;
+    fixed64 user_challenge_ticket = 2; 
+    UserChallengeType user_challenge_type = 3;
+    bytes user_challenge = 4;
+}
+
+enum UserChallengeType {
+    NONE = 0;
+    PASSWORD = 1;
+}

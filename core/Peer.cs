@@ -8,7 +8,6 @@ using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
-using Org.BouncyCastle.Crypto;
 
 namespace Luxelot;
 
@@ -71,7 +70,7 @@ internal class Peer : IDisposable
             return null;
         }
 
-        var (publicKeyBytes, privateKeyBytes) = GenerateKeysForPeer(logger);
+        var (publicKeyBytes, privateKeyBytes) = CryptoUtils.GenerateKyberKeyPair(logger);
         var peer = new Peer(peerTcpClient)
         {
             SessionPublicKey = publicKeyBytes,
@@ -79,23 +78,6 @@ internal class Peer : IDisposable
             SessionSharedKey = null // Computed after Ack received
         };
         return peer;
-    }
-
-    private byte[] ComputeSessionSharedKeyFromSynAndGetCipherText(ImmutableArray<byte> publicKey)
-    {
-        ArgumentNullException.ThrowIfNull(publicKey);
-
-        if (SessionSharedKey != null)
-            throw new InvalidOperationException("Shared key already computed!");
-
-        var secretKeyWithEncapsulationSender = CryptoUtils.GenerateChrystalsKyberEncryptionKey(publicKey);
-
-        // Shared Key
-        var encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
-        SessionSharedKey = encryptionKey.ToImmutableArray();
-
-        var encapsulatedKey = secretKeyWithEncapsulationSender.GetEncapsulation();
-        return encapsulatedKey;
     }
 
     private void ComputeSessionSharedKeyFromAckCipherText(ImmutableArray<byte> encapsulatedKey)
@@ -110,54 +92,6 @@ internal class Peer : IDisposable
         // Shared Key
         var decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, encapsulatedKey);
         SessionSharedKey = decryptionKey;
-    }
-
-    private static (ImmutableArray<byte> publicKeyBytes, ImmutableArray<byte> privateKeyBytes) GenerateKeysForPeer(ILogger logger)
-    {
-        //byte[] encryptionKey, encapsulatedKey, decryptionKey;
-        byte[] publicKeyBytes, privateKeyBytes;
-
-        using (logger.BeginScope($"Crypto setup"))
-        {
-            // Generate Kyber crypto material for our comms with this peer.
-            logger.LogInformation("Generating cryptographic key material");
-            AsymmetricCipherKeyPair node_key;
-            try
-            {
-                node_key = CryptoUtils.GenerateKyberKeyPair();
-                logger.LogDebug("Geneated Kyber key pair!");
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Unable to generate Kyber key pair");
-                throw;
-            }
-
-            // Generate the encryption key and the encapsulated key
-            //var secretKeyWithEncapsulationSender = CryptoUtils.GenerateChrystalsKyberEncryptionKey((KyberPublicKeyParameters)node_key.Public);
-            //encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
-            //encapsulatedKey = secretKeyWithEncapsulationSender.GetEncapsulation();
-
-            //logger.LogInformation("Encryption side: generate the encryption key and the encapsulated key\r\n"
-            //+ $"Encryption key length: {encryptionKey.Length} key: {CryptoUtils.BytesToHex(encryptionKey)}\r\n"
-            //+ $"Encapsulated key length: {encapsulatedKey.Length} key: {CryptoUtils.BytesToHex(encapsulatedKey)}");
-
-            privateKeyBytes = CryptoUtils.GetChrystalsKyberPrivateKeyFromEncoded(node_key);
-            //decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey);
-            //var keysAreEqual = Enumerable.SequenceEqual(encryptionKey, decryptionKey);
-
-            //logger.LogInformation("Decryption side: receive the encapsulated key and generate the decryption key\r\n"
-            //    + $"Decryption key length: {decryptionKey.Length} key: {CryptoUtils.BytesToHex(decryptionKey)}"
-            //    + $"Decryption key is equal to encryption key: {keysAreEqual}");
-
-            logger.LogTrace("Generated private key length: {PrivateKeyByteLength}", privateKeyBytes.Length);
-            publicKeyBytes = CryptoUtils.GetChrystalsKyberPublicKeyFromEncoded(node_key);
-            logger.LogTrace("Generated public key length: {PublicKeyByteLength}", publicKeyBytes.Length);
-
-            logger.LogDebug("Key pairs successfully generated");
-        }
-
-        return (publicKeyBytes.ToImmutableArray(), privateKeyBytes.ToImmutableArray());
     }
 
     internal async Task<bool> HandleInputAsync(
@@ -467,7 +401,13 @@ internal class Peer : IDisposable
         }
 
         using var scope = nodeContext.Logger?.BeginScope("Process Syn from {RemoteEndPoint}", RemoteEndPoint);
-        var encapsulatedKey = ComputeSessionSharedKeyFromSynAndGetCipherText([.. syn.SessionPubKey.ToByteArray()]);
+        if (SessionSharedKey != null) {
+            nodeContext.Logger?.LogError("Session shared key already calculated processing Syn from {RemoteEndPoint}! Closing.", RemoteEndPoint);
+            Client.Close();
+            return false;            
+        }
+        var (encapsulatedKey, sessionSharedKey) = CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey([.. syn.SessionPubKey.ToByteArray()]);
+        SessionSharedKey = sessionSharedKey;
 
         // This peer's identity key was received in Syn.
         if (IdentityPublicKey != null)
@@ -482,9 +422,10 @@ internal class Peer : IDisposable
         nodeContext.Logger?.LogDebug("ID Key for {PeerShortName} ({RemoteEndPoint}) is thumbprint {Thumbprint}", ShortName, RemoteEndPoint, DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint));
         //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, DisplayUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
         nodeContext.Logger?.LogDebug("Sending Ack to peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
+
         var message = new Ack
         {
-            ProtVer = Node.PROTOCOL_VERSION,
+            ProtVer = Node.NODE_PROTOCOL_VERSION,
             CipherText = ByteString.CopyFrom(encapsulatedKey),
             // Now provide our own identity key in the response Ack
             IdPubKey = ByteString.CopyFrom([.. nodeContext.NodeIdentityKeyPublicBytes]),
@@ -729,7 +670,7 @@ internal class Peer : IDisposable
 
         var message = new Syn
         {
-            ProtVer = Node.PROTOCOL_VERSION,
+            ProtVer = Node.NODE_PROTOCOL_VERSION,
             SessionPubKey = ByteString.CopyFrom([.. SessionPublicKey.Value]),
             IdPubKey = ByteString.CopyFrom([.. nodeContext.NodeIdentityKeyPublicBytes])
         };

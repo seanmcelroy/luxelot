@@ -1,6 +1,8 @@
 ﻿namespace Luxelot.Apps.Common;
 
-public class IClientApp
+public interface IClientApp
 {
+    public string Name { get; }
 
+    public void OnInitialize(IAppContext appContext);
 }

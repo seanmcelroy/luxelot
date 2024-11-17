@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Kyber;
@@ -26,10 +27,58 @@ public static class CryptoUtils
         return keyPair;
     }
 
-    public static AsymmetricCipherKeyPair GenerateKyberKeyPair()
+    internal static (ImmutableArray<byte> publicKeyBytes, ImmutableArray<byte> privateKeyBytes) GenerateKyberKeyPair(ILogger? logger)
     {
-        // These keys are used for PEER ENCRYPTION.  A shared key is established using
-        // the Kyber KEM process, and these are not ferried around the network.
+        byte[] publicKeyBytes, privateKeyBytes;
+
+        using (logger?.BeginScope($"Crypto setup"))
+        {
+            // Generate Kyber crypto material for our comms with this peer.
+            logger?.LogInformation("Generating cryptographic key material");
+            AsymmetricCipherKeyPair node_key;
+            try
+            {
+                node_key = GenerateKyberKeyPairInternal();
+                logger?.LogDebug("Geneated Kyber key pair!");
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Unable to generate Kyber key pair");
+                throw;
+            }
+
+            // Generate the encryption key and the encapsulated key
+            //var secretKeyWithEncapsulationSender = CryptoUtils.GenerateChrystalsKyberEncryptionKey((KyberPublicKeyParameters)node_key.Public);
+            //encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
+            //encapsulatedKey = secretKeyWithEncapsulationSender.GetEncapsulation();
+
+            //logger.LogInformation("Encryption side: generate the encryption key and the encapsulated key\r\n"
+            //+ $"Encryption key length: {encryptionKey.Length} key: {CryptoUtils.BytesToHex(encryptionKey)}\r\n"
+            //+ $"Encapsulated key length: {encapsulatedKey.Length} key: {CryptoUtils.BytesToHex(encapsulatedKey)}");
+
+            privateKeyBytes = CryptoUtils.GetChrystalsKyberPrivateKeyFromEncoded(node_key);
+            //decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey);
+            //var keysAreEqual = Enumerable.SequenceEqual(encryptionKey, decryptionKey);
+
+            //logger.LogInformation("Decryption side: receive the encapsulated key and generate the decryption key\r\n"
+            //    + $"Decryption key length: {decryptionKey.Length} key: {CryptoUtils.BytesToHex(decryptionKey)}"
+            //    + $"Decryption key is equal to encryption key: {keysAreEqual}");
+
+            logger?.LogTrace("Generated private key length: {PrivateKeyByteLength}", privateKeyBytes.Length);
+            publicKeyBytes = CryptoUtils.GetChrystalsKyberPublicKeyFromEncoded(node_key);
+            logger?.LogTrace("Generated public key length: {PublicKeyByteLength}", publicKeyBytes.Length);
+
+            logger?.LogDebug("Key pairs successfully generated");
+        }
+
+        return (publicKeyBytes.ToImmutableArray(), privateKeyBytes.ToImmutableArray());
+    }
+
+    private static AsymmetricCipherKeyPair GenerateKyberKeyPairInternal()
+    {
+        // These keys are used for PEER (neighor across the network) CHANNEL ENCRYPTION.
+        // A shared key is established using the Kyber KEM process,
+        // and these are not ferried around the network.
 
         AsymmetricCipherKeyPair key_pair;
 
@@ -71,7 +120,21 @@ public static class CryptoUtils
         return privateKeyBytes;
     }
 
-    public static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ImmutableArray<byte> publicKeyBytes)
+    public static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey)
+    {
+        ArgumentNullException.ThrowIfNull(publicKey);
+        var secretKeyWithEncapsulationSender = GenerateChrystalsKyberEncryptionKey(publicKey);
+
+        // Shared Key
+        var encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
+        var sessionSharedKey = encryptionKey.ToImmutableArray();
+
+        // Encapsulated key (cipher text)
+        var encapsulatedKey = secretKeyWithEncapsulationSender.GetEncapsulation();
+        return (encapsulatedKey, sessionSharedKey);
+    }
+
+    private static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ImmutableArray<byte> publicKeyBytes)
     {
         ArgumentNullException.ThrowIfNull(publicKeyBytes);
 

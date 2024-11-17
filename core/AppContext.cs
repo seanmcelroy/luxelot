@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Google.Protobuf;
 using Luxelot.Apps.Common;
@@ -8,6 +9,11 @@ namespace Luxelot;
 
 public class AppContext : IAppContext
 {
+    private readonly ConcurrentDictionary<Type, object> Singletons = [];
+
+    public ImmutableArray<byte> IdentityKeyPublicBytes => Node.IdentityKeyPublicBytes;
+    public ImmutableArray<byte> IdentityKeyPublicThumbprint => Node.IdentityKeyPublicThumbprint;
+
     public required ILogger? Logger { get; init; }
 
     public required Node Node { private get; init; }
@@ -26,6 +32,9 @@ public class AppContext : IAppContext
     {
         ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(message);
+
+        if (ultimateDestinationThumbprint.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {ultimateDestinationThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         var msg = Node.PrepareEnvelopePayload(null, ultimateDestinationThumbprint, message);
         bool success = msg != null;
@@ -70,6 +79,12 @@ public class AppContext : IAppContext
         ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(message);
 
+        if (routingPeerThumbprint.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(routingPeerThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {routingPeerThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+
+        if (ultimateDestinationThumbprint.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {ultimateDestinationThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+
         var routingPeer = FindPeerByThumbprint(routingPeerThumbprint) ?? throw new ArgumentOutOfRangeException(nameof(routingPeerThumbprint), $"Unable to find source-routed peer {routingPeerThumbprint} by its thumbprint");
         var msg = Node.PrepareEnvelopePayload(routingPeerThumbprint, ultimateDestinationThumbprint, message);
         bool success = msg != null;
@@ -79,6 +94,32 @@ public class AppContext : IAppContext
             success = await routingPeer.SendEnvelope(env, Logger, cancellationToken);
         }
 
+        return success;
+    }
+
+    public (ImmutableArray<byte> publicKeyBytes, ImmutableArray<byte> privateKeyBytes) GenerateKyberKeyPair() => CryptoUtils.GenerateKyberKeyPair(Logger);
+
+    public (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey) => CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(publicKey);
+
+    public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class
+    {
+        if (Singletons.ContainsKey(typeof(T)))
+            return false;
+
+        T value = valueFactory.Invoke();
+        return Singletons.TryAdd(typeof(T), value);
+    }
+
+    public bool TryGetSingleton<T>(out T? value) where T : class
+    {
+        var success = Singletons.TryGetValue(typeof(T), out object? v);
+        if (v == null)
+        {
+            value = null;
+            return false;
+        }
+        
+        value = (T)v;
         return success;
     }
 }

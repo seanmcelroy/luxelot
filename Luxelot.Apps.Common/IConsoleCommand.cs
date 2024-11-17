@@ -4,5 +4,7 @@ public interface IConsoleCommand
 {
     public string Command { get; }
 
-    public Task<bool> Invoke(IAppContext appContext, string[] words, CancellationToken cancellationToken);
+    public void OnInitialize(IAppContext appContext);
+
+    public Task<bool> Invoke(string[] words, CancellationToken cancellationToken);
 }

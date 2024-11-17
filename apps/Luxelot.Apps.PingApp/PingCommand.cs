@@ -8,10 +8,21 @@ namespace Luxelot.Apps.PingApp;
 
 public class PingCommand : IConsoleCommand
 {
+    private IAppContext? appContext;
+
     public string Command => "ping";
 
-    public async Task<bool> Invoke(IAppContext appContext, string[] words, CancellationToken cancellationToken)
+    public void OnInitialize(IAppContext appContext)
     {
+        ArgumentNullException.ThrowIfNull(appContext);
+        this.appContext = appContext;
+    }
+
+    public async Task<bool> Invoke(string[] words, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(appContext);
+        ArgumentNullException.ThrowIfNull(words);
+
         if (words.Length != 2 && words.Length != 3)
         {
             await appContext.SendConsoleMessage($"PING command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);

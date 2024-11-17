@@ -24,29 +24,29 @@ namespace Luxelot.Apps.FileServerApp.Messages {
     static AuthReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "CgphdXRoLnByb3RvIkUKBEF1dGgSEAoIcHJvdF92ZXIYASABKA0SFwoPc2Vz",
-            "c2lvbl9wdWJfa2V5GAIgASgMEhIKCmlkX3B1Yl9rZXkYAyABKAxCJqoCI0x1",
-            "eGVsb3QuQXBwcy5GaWxlU2VydmVyQXBwLk1lc3NhZ2VzYgZwcm90bzM="));
+            "CgphdXRoLnByb3RvIkYKBUF1dGgxEhAKCHByb3RfdmVyGAEgASgNEhcKD3Nl",
+            "c3Npb25fcHViX2tleRgCIAEoDBISCgppZF9wdWJfa2V5GAMgASgMQiaqAiNM",
+            "dXhlbG90LkFwcHMuRmlsZVNlcnZlckFwcC5NZXNzYWdlc2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FileServerApp.Messages.Auth), global::Luxelot.Apps.FileServerApp.Messages.Auth.Parser, new[]{ "ProtVer", "SessionPubKey", "IdPubKey" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FileServerApp.Messages.Auth1), global::Luxelot.Apps.FileServerApp.Messages.Auth1.Parser, new[]{ "ProtVer", "SessionPubKey", "IdPubKey" }, null, null, null, null)
           }));
     }
     #endregion
 
   }
   #region Messages
-  public sealed partial class Auth : pb::IMessage<Auth>
+  public sealed partial class Auth1 : pb::IMessage<Auth1>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
   #endif
   {
-    private static readonly pb::MessageParser<Auth> _parser = new pb::MessageParser<Auth>(() => new Auth());
+    private static readonly pb::MessageParser<Auth1> _parser = new pb::MessageParser<Auth1>(() => new Auth1());
     private pb::UnknownFieldSet _unknownFields;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public static pb::MessageParser<Auth> Parser { get { return _parser; } }
+    public static pb::MessageParser<Auth1> Parser { get { return _parser; } }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -62,7 +62,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public Auth() {
+    public Auth1() {
       OnConstruction();
     }
 
@@ -70,7 +70,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public Auth(Auth other) : this() {
+    public Auth1(Auth1 other) : this() {
       protVer_ = other.protVer_;
       sessionPubKey_ = other.sessionPubKey_;
       idPubKey_ = other.idPubKey_;
@@ -79,8 +79,8 @@ namespace Luxelot.Apps.FileServerApp.Messages {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public Auth Clone() {
-      return new Auth(this);
+    public Auth1 Clone() {
+      return new Auth1(this);
     }
 
     /// <summary>Field number for the "prot_ver" field.</summary>
@@ -122,12 +122,12 @@ namespace Luxelot.Apps.FileServerApp.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
-      return Equals(other as Auth);
+      return Equals(other as Auth1);
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public bool Equals(Auth other) {
+    public bool Equals(Auth1 other) {
       if (ReferenceEquals(other, null)) {
         return false;
       }
@@ -226,7 +226,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public void MergeFrom(Auth other) {
+    public void MergeFrom(Auth1 other) {
       if (other == null) {
         return;
       }
