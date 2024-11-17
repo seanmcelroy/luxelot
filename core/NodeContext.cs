@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
-using System.Text;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
+using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 
@@ -34,34 +35,15 @@ public readonly struct NodeContext(Node node)
     {
         ArgumentNullException.ThrowIfNull(original);
 
-        if (excludedNeighborThumbprint != null && excludedNeighborThumbprint.Value.Length != MessageUtils.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(excludedNeighborThumbprint), $"Thumbprints must be {MessageUtils.THUMBPRINT_LEN} bytes, but the one provided was {excludedNeighborThumbprint.Value.Length} bytes");
+        if (excludedNeighborThumbprint != null && excludedNeighborThumbprint.Value.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(excludedNeighborThumbprint), $"Thumbprints must be {Constants.THUMBPRINT_LEN} bytes, but the one provided was {excludedNeighborThumbprint.Value.Length} bytes");
 
-        await _node.RelayForwardMessage(this, original, excludedNeighborThumbprint, cancellationToken);
+        await _node.RelayForwardMessage(original, excludedNeighborThumbprint, Logger, cancellationToken);
     }
 
-    public async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken)
-    {
-        if (_node.User == null)
-            return;
-        if (!_node.User.Connected)
-            return;
-        var stream = _node.User.GetStream();
-        if (stream == null)
-            return;
-        if (!stream.CanWrite)
-            return;
+    public async Task<(bool handled, bool success)> TryHandleMessage(IRequestContext requestContext, Any message, CancellationToken cancellationToken) => 
+        await _node.TryHandleMessage(requestContext, message, cancellationToken);
 
-        var bytes_to_write = Encoding.UTF8.GetBytes($"{message}\r\n");
-        try
-        {
-            await stream.WriteAsync(bytes_to_write, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            // Swallow.
-            Logger?.LogError(ex, "Unable to write message to user. Closing.");
-            _node.User.Close();
-        }
-    }
+    public async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken) =>
+        await _node.WriteLineToUserAsync(message, cancellationToken);
 }

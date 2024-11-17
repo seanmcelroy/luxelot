@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
@@ -55,12 +56,20 @@ internal class Peer : IDisposable
         return peer;
     }
 
-    internal static async Task<Peer> CreatePeerAndConnect(IPEndPoint endPoint, ILogger logger, CancellationToken cancellationToken)
+    internal static async Task<Peer?> CreatePeerAndConnect(IPEndPoint endPoint, ILogger logger, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
 
         TcpClient peerTcpClient = new();
-        await peerTcpClient.ConnectAsync(endPoint, cancellationToken);
+        try
+        {
+            await peerTcpClient.ConnectAsync(endPoint, cancellationToken);
+        }
+        catch (SocketException sex)
+        {
+            logger.LogError(sex, "Unable to connect to {RemoteEndPoint}", endPoint);
+            return null;
+        }
 
         var (publicKeyBytes, privateKeyBytes) = GenerateKeysForPeer(logger);
         var peer = new Peer(peerTcpClient)
@@ -246,7 +255,7 @@ internal class Peer : IDisposable
                 return true;
             }
 
-            nodeContext.Logger?.LogDebug("FORWARD FROM {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", ShortName, RemoteEndPoint, CryptoUtils.BytesToHex(fwd.DstIdentityThumbprint), fwd.ForwardId);
+            nodeContext.Logger?.LogDebug("FORWARD FROM {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", ShortName, RemoteEndPoint, DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint), fwd.ForwardId);
 
             // Have I seen this message before?
             if (nodeContext.RegisterForwardId(fwd.ForwardId))
@@ -277,7 +286,7 @@ internal class Peer : IDisposable
             {
                 if (fwd.Ttl <= 1)
                 {
-                    nodeContext.Logger?.LogCritical("Forwarded message TTL via {PeerShortName} has expired: ForwardId={ForwardId}", ShortName, fwd.ForwardId);
+                    nodeContext.Logger?.LogWarning("Forwarded message TTL via {PeerShortName} has expired: ForwardId={ForwardId}", ShortName, fwd.ForwardId);
                     return true;
                 }
 
@@ -286,10 +295,7 @@ internal class Peer : IDisposable
             }
 
             // This is a forwarded message for me.            
-            nodeContext.Logger?.LogCritical("FORWARDED MESSAGE RECEIVED VIA {PeerShortName} ({RemoteEndPoint}): ForwardId={ForwardId}", ShortName, RemoteEndPoint, fwd.ForwardId);
-
-            // Unwrap
-
+            nodeContext.Logger?.LogTrace("FORWARDED MESSAGE RECEIVED VIA {PeerShortName} ({RemoteEndPoint}): ForwardId={ForwardId}", ShortName, RemoteEndPoint, fwd.ForwardId);
             switch (fwd.Payload)
             {
                 case Any any when any.Is(ErrorMessage.Descriptor):
@@ -307,7 +313,7 @@ internal class Peer : IDisposable
 
                     if (fwd.SrcIdentityPubKey == null)
                     {
-                        nodeContext.Logger?.LogWarning("Discarding forward with missing src intended for {DestinationThumbprint}.", CryptoUtils.BytesToHex(fwd.DstIdentityThumbprint));
+                        nodeContext.Logger?.LogWarning("Discarding forward with missing src intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
                         return true;
                     }
 
@@ -317,7 +323,7 @@ internal class Peer : IDisposable
                     // NOTE: A little wasteful cycles to SHA256 on each fwd message just to check the cache.
                     byte[] fwd_origin_pub_thumbprint = [.. SHA256.HashData([.. fwd_src_pub_key])];
 
-                    var cacheKey = CryptoUtils.BytesToHex(fwd_origin_pub_thumbprint);
+                    var cacheKey = DisplayUtils.BytesToHex(fwd_origin_pub_thumbprint);
                     if (!thumbnailSignatureCache.ContainsKey(cacheKey))
                     {
                         thumbnailSignatureCache.TryAdd(cacheKey, [.. fwd_src_pub_key]);
@@ -328,7 +334,7 @@ internal class Peer : IDisposable
                     var isSignatureValid = CryptoUtils.ValidateDilithiumSignature(fwd_src_pub_key, fwd_payload, fwd.Signature.ToByteArray());
                     if (!isSignatureValid)
                     {
-                        nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", CryptoUtils.BytesToHex(fwd.DstIdentityThumbprint));
+                        nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
                         return true;
                     }
 
@@ -369,7 +375,7 @@ internal class Peer : IDisposable
         nodeContext.Logger?.LogDebug("DM RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): {PayloadType}", ShortName, RemoteEndPoint, dm.Payload.TypeUrl);
         //MessageUtils.Dump(dm, nodeContext.Logger);
 
-        var isSenderVerifiable = thumbnailSignatureCache.TryGetValue(CryptoUtils.BytesToHex(dm.SrcIdentityThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey);
+        var isSenderVerifiable = thumbnailSignatureCache.TryGetValue(DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey);
         var dm_payload = dm.Payload.ToByteArray();
         var isSignatureValid = isSenderVerifiable && CryptoUtils.ValidateDilithiumSignature(sourceIdentityPublicKey, dm_payload, dm.Signature.ToByteArray());
 
@@ -379,14 +385,14 @@ internal class Peer : IDisposable
             // It is NOT destined for me.  But can I be useful and verify the signature so I do not forward corruption?
             if (isSenderVerifiable && !isSignatureValid)
             {
-                nodeContext.Logger?.LogWarning("Discarding corrupt message intended for {DestinationThumbprint}.", CryptoUtils.BytesToHex(dm.DstIdentityThumbprint));
+                nodeContext.Logger?.LogWarning("Discarding corrupt message intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(dm.DstIdentityThumbprint));
                 return true;
             }
 
             // Okay, it was NOT destined for me, but it was not wrapped as a forward.
             // This peer must be confused, or it has intentionally done this to get me to cough up my table of immediate neighbors.
             // Which I will do.  TODO Consider security implications vs. utility of this behavior.
-            nodeContext.Logger?.LogInformation("Misdirected direct message intended for {DestinationThumbprint} from {PeerShortName}; returning unreachable error.", CryptoUtils.BytesToHex(dm.DstIdentityThumbprint), ShortName);
+            nodeContext.Logger?.LogInformation("Misdirected direct message intended for {DestinationThumbprint} from {PeerShortName}; returning unreachable error.", DisplayUtils.BytesToHex(dm.DstIdentityThumbprint), ShortName);
             var neighbors = nodeContext.GetNeighborThumbprints();
             var err = new ErrorDestinationUnreachable
             {
@@ -398,20 +404,20 @@ internal class Peer : IDisposable
                 ? null
                 : nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, [.. dm.SrcIdentityThumbprint.ToByteArray()], err);
             if (err_payload != null)
-                await SendEnvelope(nodeContext, PrepareEnvelope(nodeContext, err_payload), cancellationToken);
+                await SendEnvelope(PrepareEnvelope(err_payload, nodeContext.Logger), nodeContext.Logger, cancellationToken);
             return true;
         }
 
         // Is the signature verifiable?
         if (!isSenderVerifiable)
         {
-            nodeContext.Logger?.LogError("Discarding message signed with unknown signature purportedly from {SourceThumbprint} intended for me.", CryptoUtils.BytesToHex(dm.SrcIdentityThumbprint));
+            nodeContext.Logger?.LogError("Discarding message signed with unknown signature purportedly from {SourceThumbprint} intended for me.", DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint));
             return false;
         }
 
         if (!isSignatureValid)
         {
-            nodeContext.Logger?.LogError("Discarding message with invalid signature from {SourceThumbprint} intended for me.", CryptoUtils.BytesToHex(dm.SrcIdentityThumbprint));
+            nodeContext.Logger?.LogError("Discarding message with invalid signature from {SourceThumbprint} intended for me.", DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint));
             return false;
         }
 
@@ -467,11 +473,11 @@ internal class Peer : IDisposable
         var id_pub_key_bytes = syn.IdPubKey.ToByteArray();
         IdentityPublicKey = id_pub_key_bytes.ToImmutableArray();
         IdentityPublicKeyThumbprint = SHA256.HashData(id_pub_key_bytes).ToImmutableArray();
-        Name = CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint);
+        Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
         ShortName = $"{Name[..8]}";
 
-        nodeContext.Logger?.LogDebug("ID Key for {PeerShortName} ({RemoteEndPoint}) is thumbprint {Thumbprint}", ShortName, RemoteEndPoint, CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint));
-        //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
+        nodeContext.Logger?.LogDebug("ID Key for {PeerShortName} ({RemoteEndPoint}) is thumbprint {Thumbprint}", ShortName, RemoteEndPoint, DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint));
+        //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, DisplayUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
         nodeContext.Logger?.LogDebug("Sending Ack to peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
         var message = new Ack
         {
@@ -523,7 +529,7 @@ internal class Peer : IDisposable
                 Client.Close();
                 return false;
             }
-            if (ack.IdPubKey == null || ack.IdPubKey.Length != MessageUtils.KYBER_PUBLIC_KEY_LEN)
+            if (ack.IdPubKey == null || ack.IdPubKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
             {
                 nodeContext.Logger?.LogError("Invalid Ack (IdPubKey) from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
                 Client.Close();
@@ -547,7 +553,7 @@ internal class Peer : IDisposable
         var id_pub_key_bytes = ack.IdPubKey.ToByteArray();
         IdentityPublicKey = id_pub_key_bytes.ToImmutableArray();
         IdentityPublicKeyThumbprint = SHA256.HashData(id_pub_key_bytes).ToImmutableArray();
-        Name = CryptoUtils.BytesToHex(IdentityPublicKeyThumbprint);
+        Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
         ShortName = $"{Name[..8]}";
         State = PeerState.ESTABLISHED;
 
@@ -557,6 +563,9 @@ internal class Peer : IDisposable
 
     internal async Task<bool> HandleMessage(NodeContext nodeContext, ImmutableArray<byte> verifiedSourceIdentityPubKey, Any message, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(nodeContext);
+        ArgumentNullException.ThrowIfNull(verifiedSourceIdentityPubKey);
+        ArgumentNullException.ThrowIfNull(message);
 
         switch (message)
         {
@@ -567,54 +576,29 @@ internal class Peer : IDisposable
                 {
                     var err = any.Unpack<ErrorDestinationUnreachable>();
                     nodeContext.Logger?.LogInformation("ErrorDestinationUnreachable from {PeerShortName} ({RemoteEndPoint}): {NeighborCount} neighbors provided", ShortName, RemoteEndPoint, err.NeighborThumbprints.Count);
-                    await nodeContext.WriteLineToUserAsync($"DESTINATION UNREACHABLE FOR {CryptoUtils.BytesToHex(err.UnreachableIdentityThumbprint)} VIA {ShortName}", cancellationToken);
+                    await nodeContext.WriteLineToUserAsync($"DESTINATION UNREACHABLE FOR {DisplayUtils.BytesToHex(err.UnreachableIdentityThumbprint)} VIA {ShortName}", cancellationToken);
                     return true;
                 }
-            case Any any when any.Is(Ping.Descriptor):
-                return await HandlePing(nodeContext, verifiedSourceIdentityPubKey, any.Unpack<Ping>(), cancellationToken);
-            case Any any when any.Is(Pong.Descriptor):
-                return await HandlePong(nodeContext, any.Unpack<Pong>(), cancellationToken);
+            //case Any any when any.Is(Ping.Descriptor):
+            //    return await HandlePing(nodeContext, verifiedSourceIdentityPubKey, any.Unpack<Ping>(), cancellationToken);
+            //case Any any when any.Is(Pong.Descriptor):
+            //    return await HandlePong(nodeContext, any.Unpack<Pong>(), cancellationToken);
             default:
+                var requestContext = new RequestContext
+                {
+                    PeerShortName = ShortName,
+                    LocalEndPoint = LocalEndPoint,
+                    RemoteEndPoint = RemoteEndPoint,
+                    RequestSourceIdentityPubKey = verifiedSourceIdentityPubKey,
+                    RequestSourceThumbprint = [.. SHA256.HashData([.. verifiedSourceIdentityPubKey])]
+                };
+                var (handled, success) = await nodeContext.TryHandleMessage(requestContext, message, cancellationToken);
+                if (handled)
+                    return true;
+
                 nodeContext.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Unsupported forwarded message type {PayloadType}", ShortName, RemoteEndPoint, message.TypeUrl);
                 return false;
         }
-    }
-
-    private async Task<bool> HandlePing(NodeContext nodeContext, ImmutableArray<byte> verifiedSourceIdentityPubKey, Ping ping, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(verifiedSourceIdentityPubKey);
-        ArgumentNullException.ThrowIfNull(ping);
-
-        if (IdentityPublicKeyThumbprint == null)
-            throw new InvalidOperationException("Attempted to handle a ping from a peer for which we have no identity thumbprint profiled.");
-
-        var pong = new Pong
-        {
-            Identifier = ping.Identifier,
-            Sequence = ping.Sequence,
-            Payload = ping.Payload
-        };
-
-        nodeContext.Logger?.LogDebug("Replying PONG {LocalEndPoint}->{RemoteEndPoint}", LocalEndPoint, RemoteEndPoint);
-
-        var returnThumbprint = SHA256.HashData([.. verifiedSourceIdentityPubKey]);
-        var msg = nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, [.. returnThumbprint], pong);
-        if (msg == null)
-        {
-            nodeContext.Logger?.LogError("Unknown error preparing PONG envelope; aborting response.");
-            return false;
-        }
-
-        var envelope = PrepareEnvelope(nodeContext, msg);
-        await SendEnvelope(nodeContext, envelope, cancellationToken);
-        return true;
-    }
-
-    private async Task<bool> HandlePong(NodeContext nodeContext, Pong pong, CancellationToken cancellationToken)
-    {
-        nodeContext.Logger?.LogInformation("PONG from {PeerShortName} ({RemoteEndPoint}): {Contents}", ShortName, RemoteEndPoint, $"id={pong.Identifier} seq={pong.Sequence}");
-        await nodeContext.WriteLineToUserAsync($"{pong.CalculateSize()} bytes from {RemoteEndPoint}: seq={pong.Sequence}", cancellationToken);
-        return true;
     }
     #endregion
 
@@ -643,46 +627,40 @@ internal class Peer : IDisposable
         disposed = true;
     }
 
-    public Envelope PrepareEnvelope(NodeContext nodeContext, IMessage message)
+    public Envelope PrepareEnvelope(IMessage message, ILogger? logger)
     {
-        ArgumentNullException.ThrowIfNull(nodeContext);
         ArgumentNullException.ThrowIfNull(message);
         if (message is ErrorMessage em)
-            return PrepareEnvelopeInternal(nodeContext, em: em);
+            return PrepareEnvelopeInternal(em: em, logger: logger);
         if (message is ForwardedMessage fm)
-            return PrepareEnvelopeInternal(nodeContext, fm: fm);
+            return PrepareEnvelopeInternal(fm: fm, logger: logger);
         if (message is DirectedMessage dm)
-            return PrepareEnvelopeInternal(nodeContext, dm: dm);
+            return PrepareEnvelopeInternal(dm: dm, logger: logger);
 
-        nodeContext.Logger?.LogError("Unsupported envelope payload {Type}", message.GetType().FullName);
+        logger?.LogError("Unsupported envelope payload {Type}", message.GetType().FullName);
         throw new ArgumentException($"Unsupported envelope payload type {message.GetType().FullName}");
     }
 
-    public Envelope PrepareEnvelope(NodeContext nodeContext, ErrorMessage message)
+    public Envelope PrepareEnvelope(ErrorMessage message, ILogger? logger)
     {
-        ArgumentNullException.ThrowIfNull(nodeContext);
         ArgumentNullException.ThrowIfNull(message);
-        return PrepareEnvelopeInternal(nodeContext, em: message);
+        return PrepareEnvelopeInternal(em: message, logger: logger);
     }
 
-    public Envelope PrepareEnvelope(NodeContext nodeContext, ForwardedMessage message)
+    public Envelope PrepareEnvelope(ForwardedMessage message, ILogger? logger)
     {
-        ArgumentNullException.ThrowIfNull(nodeContext);
         ArgumentNullException.ThrowIfNull(message);
-        return PrepareEnvelopeInternal(nodeContext, fm: message);
+        return PrepareEnvelopeInternal(fm: message, logger: logger);
     }
 
-    public Envelope PrepareEnvelope(NodeContext nodeContext, DirectedMessage message)
+    public Envelope PrepareEnvelope(DirectedMessage message, ILogger? logger)
     {
-        ArgumentNullException.ThrowIfNull(nodeContext);
         ArgumentNullException.ThrowIfNull(message);
-        return PrepareEnvelopeInternal(nodeContext, dm: message);
+        return PrepareEnvelopeInternal(dm: message, logger: logger);
     }
 
-    private Envelope PrepareEnvelopeInternal(NodeContext nodeContext, ErrorMessage? em = null, ForwardedMessage? fm = null, DirectedMessage? dm = null)
+    private Envelope PrepareEnvelopeInternal(ErrorMessage? em = null, ForwardedMessage? fm = null, DirectedMessage? dm = null, ILogger? logger = null)
     {
-        ArgumentNullException.ThrowIfNull(nodeContext);
-
         var envelope_payload = new EnvelopePayload();
         if (em != null)
             envelope_payload.ErrorMessage = em;
@@ -699,7 +677,7 @@ internal class Peer : IDisposable
 
         if (SessionSharedKey == null || SessionSharedKey.Value.Length == 0)
         {
-            nodeContext.Logger?.LogError("Session key is not established with peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
+            logger?.LogError("Session key is not established with peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
             throw new InvalidOperationException($"Session key is not established with peer {ShortName} ({RemoteEndPoint})");
         }
 
@@ -717,7 +695,7 @@ internal class Peer : IDisposable
         }
         catch (Exception ex)
         {
-            nodeContext.Logger?.LogError(ex, "Failed to encrypt payload; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", ShortName, RemoteEndPoint);
+            logger?.LogError(ex, "Failed to encrypt payload; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", ShortName, RemoteEndPoint);
             throw;
         }
 
@@ -756,9 +734,8 @@ internal class Peer : IDisposable
         State = PeerState.SYN_SENT;
     }
 
-    public async Task<bool> SendEnvelope(NodeContext nodeContext, Envelope envelope, CancellationToken cancellationToken)
+    public async Task<bool> SendEnvelope(Envelope envelope, ILogger? logger, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(nodeContext);
         ArgumentNullException.ThrowIfNull(envelope);
 
         var bytes_to_send = envelope.ToByteArray();
@@ -770,13 +747,48 @@ internal class Peer : IDisposable
         }
         catch (Exception ex)
         {
-            nodeContext.Logger?.LogError(ex, "Unable to write envelope bytes. Closing.");
+            logger?.LogError(ex, "Unable to write envelope bytes. Closing.");
             Client.Close();
             return false;
         }
     }
 
-    public async Task<bool> SendPing(NodeContext nodeContext, ImmutableArray<byte>? targetThumbprint, CancellationToken cancellationToken)
+    /*public async Task<bool> SendPing(NodeContext nodeContext, ImmutableArray<byte>? targetThumbprint, CancellationToken cancellationToken)
+{
+    if (IdentityPublicKeyThumbprint == null)
+        throw new InvalidOperationException("Attempted to send a ping to a peer for which we have no identity thumbprint profiled.");
+
+    var ping = new Ping
+    {
+        Identifier = 1,
+        Sequence = 1,
+        Payload = ByteString.Empty
+    };
+
+    var ping_destination = targetThumbprint == null ? IdentityPublicKeyThumbprint!.Value : targetThumbprint.Value;
+    var msg = nodeContext.PrepareEnvelopePayload(IdentityPublicKeyThumbprint.Value, ping_destination, ping);
+    bool success = msg != null;
+    if (success)
+    {
+        var env = PrepareEnvelope(nodeContext, msg!);
+        success = await SendEnvelope(nodeContext, env, cancellationToken);
+    }
+
+    if (success)
+    {
+        if (targetThumbprint == null)
+            nodeContext.Logger?.LogInformation("PING to {PeerShortName} ({RemoteEndPoint}): {Contents}", ShortName, RemoteEndPoint, $"id={ping.Identifier} seq={ping.Sequence}");
+        else
+            nodeContext.Logger?.LogInformation("PING to {PeerShortName} ({RemoteEndPoint}) destined for {DestinationThumbprint}: {Contents}", ShortName, RemoteEndPoint, CryptoUtils.BytesToHex(targetThumbprint.Value), $"id={ping.Identifier} seq={ping.Sequence}");
+    }
+    else
+    {
+        nodeContext.Logger?.LogError("ERROR sending PING to {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
+    }
+    return success;
+}*/
+
+    /*public async Task<bool> SendPing(NodeContext nodeContext, ImmutableArray<byte>? targetThumbprint, CancellationToken cancellationToken)
     {
         if (IdentityPublicKeyThumbprint == null)
             throw new InvalidOperationException("Attempted to send a ping to a peer for which we have no identity thumbprint profiled.");
@@ -809,6 +821,6 @@ internal class Peer : IDisposable
             nodeContext.Logger?.LogError("ERROR sending PING to {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
         }
         return success;
-    }
+    }*/
 }
 

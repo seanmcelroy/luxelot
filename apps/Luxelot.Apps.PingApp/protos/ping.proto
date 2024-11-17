@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option csharp_namespace = "Luxelot.Messages";
+option csharp_namespace = "Luxelot.Apps.PingApp.Messages";
 
 message Ping {
     uint32 identifier = 1;

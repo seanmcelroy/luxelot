@@ -9,7 +9,7 @@ using pb = global::Google.Protobuf;
 using pbc = global::Google.Protobuf.Collections;
 using pbr = global::Google.Protobuf.Reflection;
 using scg = global::System.Collections.Generic;
-namespace Luxelot.Messages {
+namespace Luxelot.Apps.PingApp.Messages {
 
   /// <summary>Holder for reflection information generated from pong.proto</summary>
   public static partial class PongReflection {
@@ -25,12 +25,12 @@ namespace Luxelot.Messages {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
             "Cgpwb25nLnByb3RvIj0KBFBvbmcSEgoKaWRlbnRpZmllchgBIAEoDRIQCghz",
-            "ZXF1ZW5jZRgCIAEoDRIPCgdwYXlsb2FkGAMgASgMQhOqAhBMdXhlbG90Lk1l",
-            "c3NhZ2VzYgZwcm90bzM="));
+            "ZXF1ZW5jZRgCIAEoDRIPCgdwYXlsb2FkGAMgASgMQiCqAh1MdXhlbG90LkFw",
+            "cHMuUGluZ0FwcC5NZXNzYWdlc2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.Pong), global::Luxelot.Messages.Pong.Parser, new[]{ "Identifier", "Sequence", "Payload" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.PingApp.Messages.Pong), global::Luxelot.Apps.PingApp.Messages.Pong.Parser, new[]{ "Identifier", "Sequence", "Payload" }, null, null, null, null)
           }));
     }
     #endregion
@@ -51,7 +51,7 @@ namespace Luxelot.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Luxelot.Messages.PongReflection.Descriptor.MessageTypes[0]; }
+      get { return global::Luxelot.Apps.PingApp.Messages.PongReflection.Descriptor.MessageTypes[0]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
