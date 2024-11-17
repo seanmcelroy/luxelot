@@ -718,7 +718,7 @@ public partial class Node
                 {
                     ForwardId = forwardId,
                     Ttl = 20,
-                    SrcIdentityPubKey = ByteString.CopyFrom([.. IdentityKeyPublicBytes]),
+                    SrcIdentityThumbprint = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]),
                     DstIdentityThumbprint = ByteString.CopyFrom([.. ultimateDestinationThumbprint]),
                     Payload = packed_payload,
                     Signature = ByteString.CopyFrom(signature)
@@ -826,7 +826,7 @@ public partial class Node
         {
             ForwardId = original.ForwardId,
             Ttl = original.Ttl - 1,
-            SrcIdentityPubKey = original.SrcIdentityPubKey,
+            SrcIdentityThumbprint = original.SrcIdentityThumbprint,
             DstIdentityThumbprint = original.DstIdentityThumbprint,
             Payload = original.Payload,
             Signature = original.Signature,

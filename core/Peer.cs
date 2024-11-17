@@ -266,7 +266,7 @@ internal class Peer : IDisposable
             }
 
             // Is the forwarded message purportedly from ME?  That's bogus, close client.
-            if (fwd.SrcIdentityPubKey.SequenceEqual(nodeContext.NodeIdentityKeyPublicBytes))
+            if (fwd.SrcIdentityThumbprint.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint))
             {
                 nodeContext.Logger?.LogError("Peer {PeerShortName} forwarded message to me purportedly from myself: ForwardId={ForwardId}", ShortName, fwd.ForwardId);
                 Client.Close();
@@ -291,12 +291,11 @@ internal class Peer : IDisposable
                     return true;
                 }
 
-                if (this.IdentityPublicKey != null &&
-                    !Enumerable.SequenceEqual(fwd.SrcIdentityPubKey, IdentityPublicKey.Value))
+                if (IdentityPublicKeyThumbprint != null &&
+                    !Enumerable.SequenceEqual(fwd.SrcIdentityThumbprint, IdentityPublicKeyThumbprint.Value))
                 {
                     // This is from a node which is not this peer, so remember this later on for routing.
-                    ImmutableArray<byte> srcIdentityThumbprint = [.. SHA256.HashData(fwd.SrcIdentityPubKey.ToByteArray())];
-                    nodeContext.AdvisePeerPathToIdentity(this, srcIdentityThumbprint);
+                    nodeContext.AdvisePeerPathToIdentity(this, [.. fwd.SrcIdentityThumbprint.ToByteArray()]);
                 }
 
                 await nodeContext.RelayForwardMessage(fwd, IdentityPublicKeyThumbprint, cancellationToken);
@@ -320,34 +319,27 @@ internal class Peer : IDisposable
                 default:
                     // This is the normal case, it's a forwarded message of some other type.
 
-                    if (fwd.SrcIdentityPubKey == null)
+                    if (fwd.SrcIdentityThumbprint == null)
                     {
                         nodeContext.Logger?.LogWarning("Discarding forward with missing src intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
                         return true;
                     }
 
-                    // Remember public key since we're observing it...
-                    ImmutableArray<byte> fwd_src_pub_key = [.. fwd.SrcIdentityPubKey];
-
-                    // NOTE: A little wasteful cycles to SHA256 on each fwd message just to check the cache.
-                    byte[] fwd_origin_pub_thumbprint = [.. SHA256.HashData([.. fwd_src_pub_key])];
-
+                    // If we are aware of the public key of the origin, then validate the forwarded message.
+                    ImmutableArray<byte> fwd_origin_pub_thumbprint = [.. fwd.SrcIdentityThumbprint];
                     var cacheKey = DisplayUtils.BytesToHex(fwd_origin_pub_thumbprint);
-                    if (!thumbprintSignatureCache.ContainsKey(cacheKey))
+                    if (thumbprintSignatureCache.TryGetValue(cacheKey, out ImmutableArray<byte> fwd_origin_pub_key))
                     {
-                        thumbprintSignatureCache.TryAdd(cacheKey, [.. fwd_src_pub_key]);
+                        var fwd_payload = fwd.Payload.ToByteArray();
+                        var isSignatureValid = CryptoUtils.ValidateDilithiumSignature(fwd_origin_pub_key, fwd_payload, fwd.Signature.ToByteArray());
+                        if (!isSignatureValid)
+                        {
+                            nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
+                            return true;
+                        }
                     }
 
-                    // Before handling, validate signature.
-                    var fwd_payload = fwd.Payload.ToByteArray();
-                    var isSignatureValid = CryptoUtils.ValidateDilithiumSignature(fwd_src_pub_key, fwd_payload, fwd.Signature.ToByteArray());
-                    if (!isSignatureValid)
-                    {
-                        nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
-                        return true;
-                    }
-
-                    return await HandleMessage(nodeContext, fwd_src_pub_key, fwd.Payload, cancellationToken);
+                    return await HandleMessage(nodeContext, fwd_origin_pub_thumbprint, fwd.Payload, cancellationToken);
 
                     // The sender provided no public key, so it is unverified
                     //return await HandleMessage(nodeContext, null, fwd.Payload, cancellationToken);
@@ -430,7 +422,8 @@ internal class Peer : IDisposable
             return false;
         }
 
-        return await HandleMessage(nodeContext, sourceIdentityPublicKey, dm.Payload, cancellationToken);
+        ImmutableArray<byte> srcThumbprint = [..dm.SrcIdentityThumbprint.ToByteArray()];
+        return await HandleMessage(nodeContext, srcThumbprint, dm.Payload, cancellationToken);
     }
     #endregion 
 
@@ -573,11 +566,14 @@ internal class Peer : IDisposable
         return true;
     }
 
-    internal async Task<bool> HandleMessage(NodeContext nodeContext, ImmutableArray<byte> verifiedSourceIdentityPubKey, Any message, CancellationToken cancellationToken)
+    internal async Task<bool> HandleMessage(NodeContext nodeContext, ImmutableArray<byte> sourceThumbprint, Any message, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(nodeContext);
-        ArgumentNullException.ThrowIfNull(verifiedSourceIdentityPubKey);
+        ArgumentNullException.ThrowIfNull(sourceThumbprint);
         ArgumentNullException.ThrowIfNull(message);
+
+        if (sourceThumbprint.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(sourceThumbprint), $"Source thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {sourceThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         switch (message)
         {
@@ -601,8 +597,7 @@ internal class Peer : IDisposable
                     PeerShortName = ShortName,
                     LocalEndPoint = LocalEndPoint!,
                     RemoteEndPoint = RemoteEndPoint!,
-                    RequestSourceIdentityPubKey = verifiedSourceIdentityPubKey,
-                    RequestSourceThumbprint = [.. SHA256.HashData([.. verifiedSourceIdentityPubKey])]
+                    RequestSourceThumbprint = sourceThumbprint
                 };
                 var (handled, success) = await nodeContext.TryHandleMessage(requestContext, message, cancellationToken);
                 if (handled)

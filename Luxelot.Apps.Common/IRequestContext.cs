@@ -11,5 +11,4 @@ public interface IRequestContext
     public EndPoint RemoteEndPoint { get; }
 
     public ImmutableArray<byte> RequestSourceThumbprint { get; }
-    public ImmutableArray<byte> RequestSourceIdentityPubKey { get; }
 }

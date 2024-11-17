@@ -8,7 +8,7 @@ message ForwardedMessage {
 
     fixed64 forward_id = 1;
     int32 ttl = 2;
-    bytes src_identity_pub_key = 3;
+    bytes src_identity_thumbprint = 3;
     bytes dst_identity_thumbprint = 4;
     google.protobuf.Any payload = 5;
     bytes signature = 6;

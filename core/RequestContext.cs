@@ -15,8 +15,6 @@ public class RequestContext : IRequestContext
 
     public required ImmutableArray<byte> RequestSourceThumbprint { get; init; }
 
-    public required ImmutableArray<byte> RequestSourceIdentityPubKey { get; init; }
-
     public Task<bool> Reply(IMessage message, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();

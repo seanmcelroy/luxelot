@@ -52,7 +52,7 @@ public static class MessageUtils
             return false;
         }
 
-        if (fwd.SrcIdentityPubKey == null || fwd.SrcIdentityPubKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
+        if (fwd.SrcIdentityThumbprint == null || fwd.SrcIdentityThumbprint.Length != Constants.THUMBPRINT_LEN)
             return false;
         if (fwd.DstIdentityThumbprint == null || fwd.DstIdentityThumbprint.Length != Constants.THUMBPRINT_LEN)
             return false;
