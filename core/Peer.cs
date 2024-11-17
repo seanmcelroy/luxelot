@@ -162,10 +162,10 @@ internal class Peer : IDisposable
 
     internal async Task<bool> HandleInputAsync(
         NodeContext nodeContext,
-        ConcurrentDictionary<string, ImmutableArray<byte>> thumbnailSignatureCache,
+        ConcurrentDictionary<string, ImmutableArray<byte>> thumbprintSignatureCache,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(thumbnailSignatureCache);
+        ArgumentNullException.ThrowIfNull(thumbprintSignatureCache);
         ObjectDisposedException.ThrowIf(disposed, Client);
 
         if (SessionSharedKey == null || Client.Available == 0)
@@ -180,6 +180,7 @@ internal class Peer : IDisposable
         {
             size = await Client.GetStream().ReadAsync(buffer, cancellationToken: cancellationToken);
             BytesReceived += (ulong)size;
+            LastActivity = DateTimeOffset.Now;
         }
         catch (EndOfStreamException ex)
         {
@@ -290,6 +291,14 @@ internal class Peer : IDisposable
                     return true;
                 }
 
+                if (this.IdentityPublicKey != null &&
+                    !Enumerable.SequenceEqual(fwd.SrcIdentityPubKey, IdentityPublicKey.Value))
+                {
+                    // This is from a node which is not this peer, so remember this later on for routing.
+                    ImmutableArray<byte> srcIdentityThumbprint = [.. SHA256.HashData(fwd.SrcIdentityPubKey.ToByteArray())];
+                    nodeContext.AdvisePeerPathToIdentity(this, srcIdentityThumbprint);
+                }
+
                 await nodeContext.RelayForwardMessage(fwd, IdentityPublicKeyThumbprint, cancellationToken);
                 return true;
             }
@@ -303,7 +312,7 @@ internal class Peer : IDisposable
                     return HandleErrorMessage(nodeContext, err);
                 case Any any when any.Is(DirectedMessage.Descriptor):
                     var dm = any.Unpack<DirectedMessage>();
-                    return await HandleDirectedMessage(nodeContext, dm, thumbnailSignatureCache, cancellationToken);
+                    return await HandleDirectedMessage(nodeContext, dm, thumbprintSignatureCache, cancellationToken);
                 case Any any when any.Is(ForwardedMessage.Descriptor):
                     nodeContext.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Forwarded message payload is another forwarded message.  Discarding.", ShortName, RemoteEndPoint);
                     Client.Close();
@@ -324,9 +333,9 @@ internal class Peer : IDisposable
                     byte[] fwd_origin_pub_thumbprint = [.. SHA256.HashData([.. fwd_src_pub_key])];
 
                     var cacheKey = DisplayUtils.BytesToHex(fwd_origin_pub_thumbprint);
-                    if (!thumbnailSignatureCache.ContainsKey(cacheKey))
+                    if (!thumbprintSignatureCache.ContainsKey(cacheKey))
                     {
-                        thumbnailSignatureCache.TryAdd(cacheKey, [.. fwd_src_pub_key]);
+                        thumbprintSignatureCache.TryAdd(cacheKey, [.. fwd_src_pub_key]);
                     }
 
                     // Before handling, validate signature.
@@ -347,7 +356,7 @@ internal class Peer : IDisposable
         else if (envelopePayload.DirectedMessage != null)
         {
             var dm = envelopePayload.DirectedMessage;
-            return await HandleDirectedMessage(nodeContext, dm, thumbnailSignatureCache, cancellationToken);
+            return await HandleDirectedMessage(nodeContext, dm, thumbprintSignatureCache, cancellationToken);
         }
         else
         {
@@ -369,13 +378,13 @@ internal class Peer : IDisposable
         NodeContext nodeContext,
         DirectedMessage dm,
         ConcurrentDictionary<string,
-        ImmutableArray<byte>> thumbnailSignatureCache,
+        ImmutableArray<byte>> thumbprintSignatureCache,
         CancellationToken cancellationToken)
     {
         nodeContext.Logger?.LogDebug("DM RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): {PayloadType}", ShortName, RemoteEndPoint, dm.Payload.TypeUrl);
         //MessageUtils.Dump(dm, nodeContext.Logger);
 
-        var isSenderVerifiable = thumbnailSignatureCache.TryGetValue(DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey);
+        var isSenderVerifiable = thumbprintSignatureCache.TryGetValue(DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey);
         var dm_payload = dm.Payload.ToByteArray();
         var isSignatureValid = isSenderVerifiable && CryptoUtils.ValidateDilithiumSignature(sourceIdentityPublicKey, dm_payload, dm.Signature.ToByteArray());
 
@@ -443,6 +452,7 @@ internal class Peer : IDisposable
         {
             await stream.ReadExactlyAsync(buffer, 0, size, cancellationToken: cancellationToken);
             BytesReceived += (ulong)size;
+            LastActivity = DateTimeOffset.Now;
         }
         catch (EndOfStreamException ex)
         {
@@ -490,6 +500,7 @@ internal class Peer : IDisposable
         var bytes_to_send = message.ToByteArray();
         await stream.WriteAsync(bytes_to_send, cancellationToken);
         BytesSent += (ulong)bytes_to_send.Length;
+        LastActivity = DateTimeOffset.Now;
         return true;
     }
 
@@ -511,6 +522,7 @@ internal class Peer : IDisposable
         {
             await stream.ReadExactlyAsync(buffer, 0, size, cancellationToken: cancellationToken);
             BytesReceived += (ulong)size;
+            LastActivity = DateTimeOffset.Now;
         }
         catch (EndOfStreamException ex)
         {
@@ -587,8 +599,8 @@ internal class Peer : IDisposable
                 var requestContext = new RequestContext
                 {
                     PeerShortName = ShortName,
-                    LocalEndPoint = LocalEndPoint,
-                    RemoteEndPoint = RemoteEndPoint,
+                    LocalEndPoint = LocalEndPoint!,
+                    RemoteEndPoint = RemoteEndPoint!,
                     RequestSourceIdentityPubKey = verifiedSourceIdentityPubKey,
                     RequestSourceThumbprint = [.. SHA256.HashData([.. verifiedSourceIdentityPubKey])]
                 };
@@ -730,6 +742,7 @@ internal class Peer : IDisposable
         var bytes_to_send = message.ToByteArray();
         await Client.GetStream().WriteAsync(bytes_to_send, cancellationToken);
         BytesSent += (ulong)bytes_to_send.Length;
+        LastActivity = DateTimeOffset.Now;
 
         State = PeerState.SYN_SENT;
     }
@@ -743,6 +756,7 @@ internal class Peer : IDisposable
         {
             await Client.GetStream().WriteAsync(bytes_to_send, cancellationToken);
             BytesSent += (ulong)bytes_to_send.Length;
+            LastActivity = DateTimeOffset.Now;
             return true;
         }
         catch (Exception ex)

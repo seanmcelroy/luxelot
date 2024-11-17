@@ -16,10 +16,8 @@ public class AppContext : IAppContext
 
     private Peer? FindPeerByThumbprint(ImmutableArray<byte> thumbprint) => Node.FindPeerByThumbprint(thumbprint);
 
-    public async Task SendConsoleMessage(string message, CancellationToken cancellationToken)
-    {
+    public async Task SendConsoleMessage(string message, CancellationToken cancellationToken) =>
         await Node.WriteLineToUserAsync(message, cancellationToken);
-    }
 
     public async Task<bool> SendMessage(
         ImmutableArray<byte> ultimateDestinationThumbprint,
@@ -34,16 +32,20 @@ public class AppContext : IAppContext
         if (success)
         {
             var routingPeer = FindPeerByThumbprint(ultimateDestinationThumbprint);
-            if (routingPeer != null) {
+            if (routingPeer != null)
+            {
                 // We happen to be directly connected.
-                if (msg is ForwardedMessage) {
+                if (msg is ForwardedMessage)
+                {
                     throw new InvalidOperationException();
                 }
                 var env = routingPeer.PrepareEnvelope(msg!, Logger);
                 success = await routingPeer.SendEnvelope(env, Logger, cancellationToken);
             }
-            else {
-                if (msg is not ForwardedMessage fwd) {
+            else
+            {
+                if (msg is not ForwardedMessage fwd)
+                {
                     throw new InvalidOperationException();
                 }
 
@@ -53,12 +55,10 @@ public class AppContext : IAppContext
                 // TODO: Otherwise, broadcast to all peers
                 await Node.InitiateForwardMessage(fwd, Logger, cancellationToken);
             }
-
         }
 
         return success;
     }
-
 
     public async Task<bool> SendRoutedMessage(
         ImmutableArray<byte> routingPeerThumbprint,

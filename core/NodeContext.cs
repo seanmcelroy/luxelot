@@ -31,6 +31,13 @@ public readonly struct NodeContext(Node node)
 
     public bool RegisterForwardId(UInt64 forwardId) => _node.RegisterForwardId(forwardId);
 
+    internal void AdvisePeerPathToIdentity(Peer peer, ImmutableArray<byte> thumbprint) {
+        ArgumentNullException.ThrowIfNull(peer);
+        ArgumentNullException.ThrowIfNull(thumbprint);
+
+        _node.AdvisePeerPathToIdentity(peer, thumbprint);
+    }
+
     public async Task RelayForwardMessage(ForwardedMessage original, ImmutableArray<byte>? excludedNeighborThumbprint, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(original);

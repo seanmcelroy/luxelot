@@ -4,6 +4,10 @@ namespace Luxelot.Apps.Common;
 
 public interface IServerApp
 {
+    public string Name { get; }
+
+    public bool InspectsForwarding { get; }
+
     public void OnNodeInitialize(IAppContext appContext);
 
     public bool CanHandle(Any message);

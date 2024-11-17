@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.ComponentModel;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -11,9 +10,9 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Operators;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 
 namespace Luxelot;
@@ -27,10 +26,17 @@ public partial class Node
     public required int UserPort { get; init; }
     public IPEndPoint[]? Phonebook { get; init; }
 
+    // Local state
     private readonly ConcurrentDictionary<TaskEntry, Task> Tasks = [];
     private readonly ConcurrentDictionary<EndPoint, Peer> Peers = [];
-    private readonly ConcurrentDictionary<string, ImmutableArray<byte>> ThumbnailSignatureCache = [];
+
+
+    // Network state
+    private readonly ConcurrentDictionary<string, ImmutableArray<byte>> ThumbprintSignatureCache = [];
     private readonly ConcurrentDictionary<UInt64, bool> ForwardIds = [];
+    private readonly MemoryCache ThumbprintPeerPaths;
+
+
     internal TcpClient? User;
     private readonly Mutex UserMutex = new();
     private readonly AsymmetricCipherKeyPair IdentityKeys;
@@ -39,6 +45,7 @@ public partial class Node
     public string Name { get; init; }
     public string ShortName { get; init; }
 
+    // Plug-ins
     readonly List<IServerApp> ServerApps = [];
     readonly List<IConsoleCommand> ConsoleCommands = [];
 
@@ -64,6 +71,9 @@ public partial class Node
         }
 
         Logger.LogInformation("Generated node identity key with thumbprint {Thumbprint}", Name);
+
+        ThumbprintPeerPaths = new(new MemoryCacheOptions {}, loggerFactory);
+        Logger.LogInformation("Setup memory caches");
     }
 
     public void Main(CancellationToken cancellationToken)
@@ -344,7 +354,7 @@ public partial class Node
                             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                         }
                         else
-                            ThumbnailSignatureCache.TryAdd(DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
+                            ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
 
                     }, cancellationToken));
                 }
@@ -439,7 +449,7 @@ public partial class Node
             // Peer walk
             foreach (var peer in Peers.Values)
             {
-                var shutdown = !await peer.HandleInputAsync(context, ThumbnailSignatureCache, cancellationToken);
+                var shutdown = !await peer.HandleInputAsync(context, ThumbprintSignatureCache, cancellationToken);
                 if (shutdown)
                 {
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
@@ -473,7 +483,7 @@ public partial class Node
                 }
                 else
                 {
-                    ThumbnailSignatureCache.TryAdd(DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
+                    ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
 
                     // Okay, we made it!
                     Logger.LogDebug("Sending test message to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
@@ -525,10 +535,10 @@ public partial class Node
             case "cache":
                 {
                     await context.WriteLineToUserAsync("Thumbprint Cache List", cancellationToken);
-                    var thumb_len = ThumbnailSignatureCache.IsEmpty ? 0 : ThumbnailSignatureCache.Keys.Max(p => p.Length);
+                    var thumb_len = ThumbprintSignatureCache.IsEmpty ? 0 : ThumbprintSignatureCache.Keys.Max(p => p.Length);
                     await context.WriteLineToUserAsync($"{"IdPubKeyThumbprint".PadRight(thumb_len)} IdPubKey", cancellationToken);
 
-                    foreach (var cache in ThumbnailSignatureCache)
+                    foreach (var cache in ThumbprintSignatureCache)
                     {
                         await context.WriteLineToUserAsync($"{cache.Key} {DisplayUtils.BytesToHex(cache.Value)}", cancellationToken);
                     }
@@ -780,6 +790,19 @@ public partial class Node
             await peer.SendEnvelope(envelope, logger, cancellationToken);
             Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex([.. original.DstIdentityThumbprint]), original.ForwardId);
         }
+    }
+
+    internal void AdvisePeerPathToIdentity(Peer peer, ImmutableArray<byte>? thumbprint) {
+        ArgumentNullException.ThrowIfNull(peer);
+        ArgumentNullException.ThrowIfNull(thumbprint);
+
+        // This cache is keyed by string representations of thumbprints.
+        // The cache value is the peer short name
+        var cacheKey = DisplayUtils.BytesToHex(thumbprint);
+
+        ThumbprintPeerPaths.Set(cacheKey, peer.ShortName, new MemoryCacheEntryOptions {
+            SlidingExpiration = new TimeSpan(0, 15, 0) // For 15 minutes
+        });
     }
 
     internal async Task RelayForwardMessage(ForwardedMessage original, ImmutableArray<byte>? excludedNeighborThumbprint, ILogger? logger, CancellationToken cancellationToken)

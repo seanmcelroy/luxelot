@@ -9,17 +9,16 @@ public class PingServer : IServerApp
 {
     private IAppContext? appContext;
 
+    public string Name => "ping";
+
+    public bool InspectsForwarding => false;
+
     public PingServer() { }
 
     public void OnNodeInitialize(IAppContext appContext)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         this.appContext = appContext;
-    }
-
-    public void OnNodeShutdown()
-    {
-        throw new NotImplementedException();
     }
 
     public bool CanHandle(Any message) => message.Is(Ping.Descriptor) || message.Is(Pong.Descriptor);

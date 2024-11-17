@@ -38,12 +38,21 @@ internal class Program
         {
             PeerPort = 9002,
             UserPort = 8002,
+            Phonebook = [
+                new IPEndPoint(IPAddress.Loopback, 9003) // Bob calls Carol
+            ]
+        };
+        var dave = new Node(factory, "Dave")
+        {
+            PeerPort = 9003,
+            UserPort = 8003,
         };
 
         var tasks = new Task[]{
             Task.Run(() => alice.Main(cts.Token), cts.Token),
             Task.Run(() => bob.Main(cts.Token), cts.Token),
-            Task.Run(() => carol.Main(cts.Token), cts.Token)
+            Task.Run(() => carol.Main(cts.Token), cts.Token),
+            Task.Run(() => dave.Main(cts.Token), cts.Token),
         };
         Task.WaitAll(tasks, cts.Token); ;
     }
