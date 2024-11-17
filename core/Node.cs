@@ -814,17 +814,11 @@ public partial class Node
 
     public async Task<(bool handled, bool success)> TryHandleMessage(IRequestContext requestContext, Any message, CancellationToken cancellationToken)
     {
-        var appContext = new AppContext
-        {
-            Logger = Logger,
-            Node = this
-        };
-
         foreach (var serverApp in ServerApps)
         {
             if (serverApp.CanHandle(message))
             {
-                var success = await serverApp.HandleMessage(requestContext, appContext, message, cancellationToken);
+                var success = await serverApp.HandleMessage(requestContext, message, cancellationToken);
                 return (true, success);
             }
         }
