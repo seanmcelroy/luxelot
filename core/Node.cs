@@ -286,6 +286,7 @@ public partial class Node
                             User.Close();
                             User.Dispose();
                             User = null;
+                            continue;
                         }
 
                         User = user;
@@ -298,20 +299,20 @@ public partial class Node
                     // User input handler loop
                     await User.GetStream().WriteAsync(Encoding.UTF8.GetBytes($"\r\nHELLO.\r\n"), cancellationToken);
 
-                    var user_okay = true;
-                    while (!cancellationToken.IsCancellationRequested && user_okay)
+                    while (!cancellationToken.IsCancellationRequested && User != null)
                     {
                         var buffer = new byte[1024]; // 1 kb
                         int size = 0;
                         try
                         {
-                            size = await User.GetStream().ReadAsync(buffer, cancellationToken: cancellationToken);
+                            size = await User.GetStream().ReadAtLeastAsync(buffer, 1, cancellationToken: cancellationToken);
                         }
                         catch (EndOfStreamException ex)
                         {
-                            Logger.LogWarning(ex, "End of stream from user {RemoteEndPoint} could be processed. Closing.", User.Client?.RemoteEndPoint);
+                            Logger.LogInformation("User disconnected from console {RemoteEndPoint}. Closing.", User.Client?.RemoteEndPoint);
                             User.Close();
-                            user_okay = false;
+                            User.Dispose();
+                            User = null;
                             continue;
                         }
 
@@ -605,35 +606,7 @@ public partial class Node
                 }
                 await context.WriteLineToUserAsync("End of Peer List", cancellationToken);
                 break;
-
-            /*case "ping":
-                if (words.Length != 2 && words.Length != 3)
-                {
-                    await context.WriteLineToUserAsync($"PING command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
-                    return;
-                }
-
-                var peer_to_ping = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
-                if (peer_to_ping == null)
-                {
-                    await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
-                    return;
-                }
-
-                ImmutableArray<byte>? ping_target = null;
-                if (words.Length == 3)
-                {
-                    ping_target = [.. CryptoUtils.HexToBytes(words[2])];
-                    if (ping_target.Value.Length != MessageUtils.THUMBPRINT_LEN)
-                    {
-                        await context.WriteLineToUserAsync($"Invalid THUMBPRINT for the intended recipient.  Thumbprints are {MessageUtils.THUMBPRINT_LEN} bytes.", cancellationToken);
-                        return;
-                    }
-                }
-
-                var success = await peer_to_ping.SendPing(context, ping_target, cancellationToken);
-                break;*/
-
+                
             case "shutdown":
                 Environment.Exit(0);
                 break;
