@@ -50,9 +50,9 @@ internal class Program
 
         var tasks = new Task[]{
             Task.Run(() => alice.Main(cts.Token), cts.Token),
-            Task.Run(() => bob.Main(cts.Token), cts.Token),
-            Task.Run(() => carol.Main(cts.Token), cts.Token),
-            Task.Run(() => dave.Main(cts.Token), cts.Token),
+            //Task.Run(() => bob.Main(cts.Token), cts.Token),
+            //Task.Run(() => carol.Main(cts.Token), cts.Token),
+            //Task.Run(() => dave.Main(cts.Token), cts.Token),
         };
         Task.WaitAll(tasks, cts.Token); ;
     }

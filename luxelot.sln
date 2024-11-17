@@ -11,6 +11,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "apps", "apps", "{936A2D51-C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Luxelot.Apps.PingApp", "apps\Luxelot.Apps.PingApp\Luxelot.Apps.PingApp.csproj", "{C75DDCC6-13F8-443C-A916-3E5EE5AB0793}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Luxelot.Apps.FileServerApp", "apps\Luxelot.Apps.FileServerApp\Luxelot.Apps.FileServerApp.csproj", "{569EA8EF-BB4A-4DC8-9523-16DCE0305279}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -29,6 +31,10 @@ Global
 		{C75DDCC6-13F8-443C-A916-3E5EE5AB0793}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C75DDCC6-13F8-443C-A916-3E5EE5AB0793}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C75DDCC6-13F8-443C-A916-3E5EE5AB0793}.Release|Any CPU.Build.0 = Release|Any CPU
+		{569EA8EF-BB4A-4DC8-9523-16DCE0305279}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{569EA8EF-BB4A-4DC8-9523-16DCE0305279}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{569EA8EF-BB4A-4DC8-9523-16DCE0305279}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{569EA8EF-BB4A-4DC8-9523-16DCE0305279}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -38,5 +44,6 @@ Global
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{C75DDCC6-13F8-443C-A916-3E5EE5AB0793} = {936A2D51-C47A-48DD-A88D-E5EF9C0E102E}
+		{569EA8EF-BB4A-4DC8-9523-16DCE0305279} = {936A2D51-C47A-48DD-A88D-E5EF9C0E102E}
 	EndGlobalSection
 EndGlobal

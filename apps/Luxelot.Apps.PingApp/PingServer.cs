@@ -13,8 +13,6 @@ public class PingServer : IServerApp
 
     public bool InspectsForwarding => false;
 
-    public PingServer() { }
-
     public void OnNodeInitialize(IAppContext appContext)
     {
         ArgumentNullException.ThrowIfNull(appContext);

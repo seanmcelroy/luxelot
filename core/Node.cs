@@ -3,6 +3,8 @@ using System.Collections.Immutable;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -72,11 +74,11 @@ public partial class Node
 
         Logger.LogInformation("Generated node identity key with thumbprint {Thumbprint}", Name);
 
-        ThumbprintPeerPaths = new(new MemoryCacheOptions {}, loggerFactory);
+        ThumbprintPeerPaths = new(new MemoryCacheOptions { }, loggerFactory);
         Logger.LogInformation("Setup memory caches");
     }
 
-    public void Main(CancellationToken cancellationToken)
+    public async void Main(CancellationToken cancellationToken)
     {
         var nodeContext = new NodeContext(this)
         {
@@ -88,56 +90,31 @@ public partial class Node
 
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        var pingPath = "/home/sean/src/luxelot/apps/Luxelot.Apps.PingApp/bin/Debug/net8.0/Luxelot.Apps.PingApp.dll";
-
-        var appContext = new AppContext()
+        // Discover plugins
+        var assemblyPath = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+        Logger.LogInformation("Looking for plugins to load in {AssemblyPath}", assemblyPath);
+        var potentialPlugins = Directory.EnumerateFiles(assemblyPath, "*App.dll").ToArray();
+        foreach (var potentialPlugin in potentialPlugins)
         {
-            Logger = Logger,
-            Node = this,
-        };
-
-        // Load Apps
-        foreach (var path in new string[] { pingPath })
-        {
-            var ass2 = new AppLoader();
-            ass2.LoadFromAssemblyPath(path);
-            var types = ass2.Assemblies.SelectMany(a => a.ExportedTypes).ToArray();
-
-            // Load Server Apps
-            var serverAppTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IServerApp).FullName) == 0)).ToArray();
-            foreach (var serverAppType in serverAppTypes)
+            await using var stream = File.OpenRead(potentialPlugin);
+            using var pe = new PEReader(stream);
+            if (pe.HasMetadata)
             {
-                var objApp = Activator.CreateInstance(serverAppType, true);
-#pragma warning disable IDE0019 // Use pattern matching
-                var serverApp = objApp as IServerApp;
-#pragma warning restore IDE0019 // Use pattern matching
-                if (serverApp == null)
+                try
                 {
-                    Logger.LogError("Unable to load server app {TypeName}", serverAppType.FullName);
-                    continue;
+                    // If PEHeaders doesn't throw an exception, it is a valid PEImage
+                    _ = pe.PEHeaders.CorHeader;
+                    var md = pe.GetMetadataReader();
+                    if (md.IsAssembly)
+                    {
+                        // .NET assembly
+                        LoadApp(potentialPlugin);
+                    }
                 }
-
-                serverApp.OnNodeInitialize(appContext);
-                ServerApps.Add(serverApp);
-                Logger.LogInformation("Loaded server app {TypeName}", serverAppType.FullName);
-            }
-
-            // Load Console Commands
-            var consoleCommandTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IConsoleCommand).FullName) == 0)).ToArray();
-            foreach (var consoleCommandType in consoleCommandTypes)
-            {
-                var objApp = Activator.CreateInstance(consoleCommandType, true);
-#pragma warning disable IDE0019 // Use pattern matching
-                var consoleCommand = objApp as IConsoleCommand;
-#pragma warning restore IDE0019 // Use pattern matching
-                if (consoleCommand == null)
+                catch (BadImageFormatException)
                 {
-                    Logger.LogError("Unable to load console command {TypeName}", consoleCommandType.FullName);
-                    continue;
+                    // Swallow.
                 }
-
-                ConsoleCommands.Add(consoleCommand);
-                Logger.LogInformation("Loaded console command {TypeName} ({CommandName})", consoleCommandType.FullName, consoleCommand.Command);
             }
         }
 
@@ -247,6 +224,62 @@ public partial class Node
         }
     }
 
+    public void LoadApp(string appPath)
+    {
+        ArgumentNullException.ThrowIfNull(appPath);
+
+        var appContext = new AppContext()
+        {
+            Logger = Logger,
+            Node = this,
+        };
+
+        // Load Apps
+        foreach (var path in new string[] { appPath })
+        {
+            var ass2 = new AppLoader();
+            ass2.LoadFromAssemblyPath(path);
+            var types = ass2.Assemblies.SelectMany(a => a.ExportedTypes).ToArray();
+
+            // Load Server Apps
+            var serverAppTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IServerApp).FullName) == 0)).ToArray();
+            foreach (var serverAppType in serverAppTypes)
+            {
+                var objApp = Activator.CreateInstance(serverAppType, true);
+#pragma warning disable IDE0019 // Use pattern matching
+                var serverApp = objApp as IServerApp;
+#pragma warning restore IDE0019 // Use pattern matching
+                if (serverApp == null)
+                {
+                    Logger.LogError("Unable to load server app {TypeName}", serverAppType.FullName);
+                    continue;
+                }
+
+                serverApp.OnNodeInitialize(appContext);
+                ServerApps.Add(serverApp);
+                Logger.LogInformation("Loaded server app {AppName} ({TypeName})", serverApp.Name, serverAppType.FullName);
+            }
+
+            // Load Console Commands
+            var consoleCommandTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IConsoleCommand).FullName) == 0)).ToArray();
+            foreach (var consoleCommandType in consoleCommandTypes)
+            {
+                var objApp = Activator.CreateInstance(consoleCommandType, true);
+#pragma warning disable IDE0019 // Use pattern matching
+                var consoleCommand = objApp as IConsoleCommand;
+#pragma warning restore IDE0019 // Use pattern matching
+                if (consoleCommand == null)
+                {
+                    Logger.LogError("Unable to load console command {TypeName}", consoleCommandType.FullName);
+                    continue;
+                }
+
+                ConsoleCommands.Add(consoleCommand);
+                Logger.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
+            }
+        }
+    }
+
     #region Tasks
     private async Task UserListenerTask(NodeContext context, CancellationToken cancellationToken)
     {
@@ -307,8 +340,9 @@ public partial class Node
                         {
                             size = await User.GetStream().ReadAtLeastAsync(buffer, 1, cancellationToken: cancellationToken);
                         }
-                        catch (EndOfStreamException ex)
+                        catch (EndOfStreamException)
                         {
+                            // Swallow.
                             Logger.LogInformation("User disconnected from console {RemoteEndPoint}. Closing.", User.Client?.RemoteEndPoint);
                             User.Close();
                             User.Dispose();
@@ -606,7 +640,7 @@ public partial class Node
                 }
                 await context.WriteLineToUserAsync("End of Peer List", cancellationToken);
                 break;
-                
+
             case "shutdown":
                 Environment.Exit(0);
                 break;
@@ -765,7 +799,8 @@ public partial class Node
         }
     }
 
-    internal void AdvisePeerPathToIdentity(Peer peer, ImmutableArray<byte>? thumbprint) {
+    internal void AdvisePeerPathToIdentity(Peer peer, ImmutableArray<byte>? thumbprint)
+    {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentNullException.ThrowIfNull(thumbprint);
 
@@ -773,7 +808,8 @@ public partial class Node
         // The cache value is the peer short name
         var cacheKey = DisplayUtils.BytesToHex(thumbprint);
 
-        ThumbprintPeerPaths.Set(cacheKey, peer.ShortName, new MemoryCacheEntryOptions {
+        ThumbprintPeerPaths.Set(cacheKey, peer.ShortName, new MemoryCacheEntryOptions
+        {
             SlidingExpiration = new TimeSpan(0, 15, 0) // For 15 minutes
         });
     }
