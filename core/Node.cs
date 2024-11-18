@@ -877,6 +877,21 @@ public partial class Node
         return (false, false);
     }
 
+    public bool TryAddThumbprintSignatureCache(ImmutableArray<byte> thumbprint, ImmutableArray<byte> publicKey) {
+        ArgumentNullException.ThrowIfNull(thumbprint);
+        ArgumentNullException.ThrowIfNull(publicKey);
+
+        if (thumbprint.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (publicKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
+            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Public key should be {Constants.KYBER_PUBLIC_KEY_LEN} bytes long but was {publicKey.Length} bytes.");
+
+        // Verify these match - be paranoid.
+        if (!Enumerable.SequenceEqual(thumbprint, SHA256.HashData([.. publicKey])))
+            return false;
+    
+        return ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(thumbprint), publicKey);
+    }
 
     internal async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken)
     {

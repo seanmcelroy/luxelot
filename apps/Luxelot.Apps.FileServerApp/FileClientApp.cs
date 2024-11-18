@@ -97,6 +97,8 @@ public class FileClientApp : IClientApp
         //appContext.Logger?.LogCritical("CLIENT FSERV SESSION KEY: {SessionSharedKey}", DisplayUtils.BytesToHex(SessionSharedKey));
         appContext.Logger?.LogInformation("FSERVE AuthChannelResponse received from {SourceThumbprint}. Session shared key established.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
 
+        appContext.TryAddThumbprintSignatureCache(ServerThumbprint.Value, [.. acr.IdPubKey.ToByteArray()]);
+
         var frame = FrameUtils.WrapClientFrame(
             appContext,
             new AuthUserBegin

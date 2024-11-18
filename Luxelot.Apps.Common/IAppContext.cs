@@ -39,5 +39,7 @@ public interface IAppContext
 
     public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class;
 
+    public bool TryAddThumbprintSignatureCache(ImmutableArray<byte> thumbprint, ImmutableArray<byte> publicKey);
+
     public bool TryGetSingleton<T>(out T? value) where T : class;
 }

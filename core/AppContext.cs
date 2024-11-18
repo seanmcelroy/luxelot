@@ -114,6 +114,18 @@ public class AppContext : IAppContext
         return Singletons.TryAdd(typeof(T), value);
     }
 
+    public bool TryAddThumbprintSignatureCache(ImmutableArray<byte> thumbprint, ImmutableArray<byte> publicKey) {
+        ArgumentNullException.ThrowIfNull(thumbprint);
+        ArgumentNullException.ThrowIfNull(publicKey);
+
+        if (thumbprint.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (publicKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
+            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Public key should be {Constants.KYBER_PUBLIC_KEY_LEN} bytes long but was {publicKey.Length} bytes.");
+
+        return Node.TryAddThumbprintSignatureCache(thumbprint, publicKey);
+    }
+
     public bool TryGetSingleton<T>(out T? value) where T : class
     {
         var success = Singletons.TryGetValue(typeof(T), out object? v);
