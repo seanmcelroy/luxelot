@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Luxelot.App.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
@@ -42,7 +43,7 @@ internal class Peer : IDisposable
         Client = tcpClient;
     }
 
-    internal static Peer CreatePeerFromAccept(TcpClient tcpClient, ILogger logger)
+    internal static Peer CreatePeerFromAccept(TcpClient tcpClient)
     {
         ArgumentNullException.ThrowIfNull(tcpClient);
 
@@ -80,20 +81,6 @@ internal class Peer : IDisposable
         return peer;
     }
 
-    private void ComputeSessionSharedKeyFromAckCipherText(ImmutableArray<byte> encapsulatedKey)
-    {
-        ArgumentNullException.ThrowIfNull(encapsulatedKey);
-
-        if (SessionSharedKey != null)
-            throw new InvalidOperationException("Shared key already computed!");
-        if (SessionPrivateKey == null)
-            throw new InvalidOperationException("Private key not set!");
-
-        // Shared Key
-        var decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, encapsulatedKey);
-        SessionSharedKey = decryptionKey;
-    }
-
     internal async Task<bool> HandleInputAsync(
         NodeContext nodeContext,
         ConcurrentDictionary<string, ImmutableArray<byte>> thumbprintSignatureCache,
@@ -112,8 +99,9 @@ internal class Peer : IDisposable
         int size;
         try
         {
-            size = await Client.GetStream().ReadAsync(buffer, cancellationToken: cancellationToken);
+            size = await Client.GetStream().ReadAtLeastAsync(buffer, 1, cancellationToken: cancellationToken);
             BytesReceived += (ulong)size;
+            //nodeContext.Logger?.LogTrace("HandleInputAsync read {BytesReceived} bytes", size);
             LastActivity = DateTimeOffset.Now;
         }
         catch (EndOfStreamException ex)
@@ -139,29 +127,16 @@ internal class Peer : IDisposable
         //MessageUtils.Dump(envelope, nodeContext.Logger);
         //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
 
-        byte[] nonce = envelope.Nonce.ToByteArray();
-        byte[] cipher_text = envelope.Ciphertext.ToByteArray();
-        byte[] envelope_plain_text = new byte[cipher_text.Length];
-        byte[] tag = envelope.Tag.ToByteArray();
-        byte[] associated_data = envelope.AssociatedData.ToByteArray();
-        try
-        {
-            using ChaCha20Poly1305 cha = new([.. SessionSharedKey.Value]);
-            cha.Decrypt(nonce, cipher_text, tag, envelope_plain_text, associated_data);
+        byte[] envelope_plain_text;
+        try {
+            envelope_plain_text = CryptoUtils.DecryptEnvelopeInternal(envelope, SessionSharedKey.Value, nodeContext.Logger);
         }
-        catch (AuthenticationTagMismatchException atme)
+        catch
         {
-            nodeContext.Logger?.LogError(atme, "Failed to decrypt message; closing down connection to victim {PeerShortName} ({RemoteEndPoint}). Incorrect session key?", ShortName, RemoteEndPoint);
+            // Swallow.  Anything worth logging is handled by DecryptEnvelopeInternal() before rethrowing to here.
             Client.Close();
             return false;
         }
-        catch (Exception ex)
-        {
-            nodeContext.Logger?.LogError(ex, "Failed to decrypt message; closing down connection to victim {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
-            Client.Close();
-            return false;
-        }
-        nodeContext.Logger?.LogTrace("Decrypted message from {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
 
         EnvelopePayload envelopePayload;
         try
@@ -492,7 +467,12 @@ internal class Peer : IDisposable
 
         using var scope = nodeContext.Logger?.BeginScope("Process Ack from {RemoteEndPoint}", RemoteEndPoint);
 
-        ComputeSessionSharedKeyFromAckCipherText([.. ack.CipherText.ToByteArray()]);
+        // Shared Key
+        if (SessionSharedKey != null)
+            throw new InvalidOperationException("Shared key already computed!");
+        if (SessionPrivateKey == null)
+            throw new InvalidOperationException("Private key not set!");
+        SessionSharedKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. ack.CipherText.ToByteArray()]);
         if (IdentityPublicKey != null)
             throw new InvalidOperationException($"Peer {Name} should have an empty identity public key field at Ack time!");
 
@@ -629,34 +609,7 @@ internal class Peer : IDisposable
             throw new InvalidOperationException($"Session key is not established with peer {ShortName} ({RemoteEndPoint})");
         }
 
-        byte[] nonce = new byte[12];
-        byte[] plain_text = envelope_payload_bytes;
-        byte[] cipher_text = new byte[plain_text.Length];
-        byte[] tag = new byte[16];
-        byte[]? associated_data = null;
-        try
-        {
-            using ChaCha20Poly1305 cha = new([.. SessionSharedKey.Value]);
-            RandomNumberGenerator.Fill(nonce);
-            RandomNumberGenerator.Fill(associated_data);
-            cha.Encrypt(nonce, plain_text, cipher_text, tag, associated_data);
-        }
-        catch (Exception ex)
-        {
-            logger?.LogError(ex, "Failed to encrypt payload; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", ShortName, RemoteEndPoint);
-            throw;
-        }
-
-        var envelope = new Envelope
-        {
-            Nonce = ByteString.CopyFrom(nonce),
-            Ciphertext = ByteString.CopyFrom(cipher_text),
-            Tag = ByteString.CopyFrom(tag),
-            AssociatedData = associated_data == null ? ByteString.Empty : ByteString.CopyFrom(associated_data)
-        };
-        //MessageUtils.Dump(envelope, nodeContext.Logger);
-        //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
-        return envelope;
+        return CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, SessionSharedKey.Value, logger);
     }
 
     public async Task SendSyn(NodeContext nodeContext, CancellationToken cancellationToken)
@@ -692,6 +645,7 @@ internal class Peer : IDisposable
         {
             await Client.GetStream().WriteAsync(bytes_to_send, cancellationToken);
             BytesSent += (ulong)bytes_to_send.Length;
+            //logger?.LogTrace("SendEnvelope sent {BytesSent} bytes", bytes_to_send.Length);
             LastActivity = DateTimeOffset.Now;
             return true;
         }

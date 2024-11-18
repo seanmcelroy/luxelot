@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Apps.FileServerApp.Messages";
+
+message ServerFrame
+{
+    bytes nonce = 1;
+    bytes ciphertext = 2;
+    bytes tag = 3;
+    bytes associated_data = 4;
+    ServerFrameType frame_type = 5;
+}
+
+enum ServerFrameType {
+    AuthUserChallenge = 0;
+    Status = 1;
+}

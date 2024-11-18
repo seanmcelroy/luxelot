@@ -1,4 +1,7 @@
 using System.Collections.Immutable;
+using System.Security.Cryptography;
+using Google.Protobuf;
+using Luxelot.App.Common.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
@@ -191,6 +194,75 @@ public static class CryptoUtils
         }
 
         return [.. key_bytes];
+    }
+
+    public static Envelope EncryptEnvelopeInternal(byte[] envelopePayload, ImmutableArray<byte> sharedKey, ILogger? logger)
+    {
+        ArgumentNullException.ThrowIfNull(envelopePayload);
+        ArgumentNullException.ThrowIfNull(sharedKey);
+
+        byte[] nonce = new byte[12];
+        byte[] plain_text = envelopePayload;
+        byte[] cipher_text = new byte[plain_text.Length];
+        byte[] tag = new byte[16];
+        byte[]? associated_data = null;
+        try
+        {
+            using ChaCha20Poly1305 cha = new([.. sharedKey]);
+            RandomNumberGenerator.Fill(nonce);
+            RandomNumberGenerator.Fill(associated_data);
+            cha.Encrypt(nonce, plain_text, cipher_text, tag, associated_data);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Failed to encrypt payload");
+            throw;
+        }
+
+        var envelope = new Envelope
+        {
+            Nonce = ByteString.CopyFrom(nonce),
+            Ciphertext = ByteString.CopyFrom(cipher_text),
+            Tag = ByteString.CopyFrom(tag),
+            AssociatedData = associated_data == null ? ByteString.Empty : ByteString.CopyFrom(associated_data)
+        };
+
+        //MessageUtils.Dump(envelope, logger);
+        //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
+        return envelope;
+    }
+
+    public static byte[] DecryptEnvelopeInternal(Envelope envelope, ImmutableArray<byte> sharedKey, ILogger? logger)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(sharedKey);
+
+        //MessageUtils.Dump(envelope, logger);
+
+        byte[] nonce = envelope.Nonce.ToByteArray();
+        byte[] cipher_text = envelope.Ciphertext.ToByteArray();
+        byte[] tag = envelope.Tag.ToByteArray();
+        byte[] associated_data = envelope.AssociatedData.ToByteArray();
+
+        byte[] envelope_plain_text = new byte[cipher_text.Length];
+
+        try
+        {
+            using ChaCha20Poly1305 cha = new([.. sharedKey]);
+            cha.Decrypt(nonce, cipher_text, tag, envelope_plain_text, associated_data);
+        }
+        catch (AuthenticationTagMismatchException atme)
+        {
+            logger?.LogError(atme, "Failed to decrypt message. Incorrect session key?");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Failed to decrypt message; closing down connection to victim");
+            throw;
+        }
+
+        return envelope_plain_text;
     }
 
     public static bool ValidateDilithiumSignature(ImmutableArray<byte> publicKey, byte[] message, byte[] signature)

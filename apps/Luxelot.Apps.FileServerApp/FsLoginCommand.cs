@@ -1,7 +1,5 @@
 using System.Collections.Immutable;
-using Google.Protobuf;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.FileServerApp.Messages;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.FileServerApp;
@@ -53,13 +51,6 @@ public class LoginCommand : IConsoleCommand
             return false;
         }
 
-        var authChannelBegin = new AuthChannelBegin
-        {
-            ProtVer = FileServerApp.FS_PROTOCOL_VERSION,
-            SessionPubKey = ByteString.CopyFrom([.. fileClientApp.SessionPublicKey!]),
-        };
-
-        var success = await appContext.SendMessage(ultimateDestinationThumbprint.Value, authChannelBegin, cancellationToken);
-        return success;
+        return await fileClientApp.SendAuthChannelBegin(ultimateDestinationThumbprint.Value, words[2], cancellationToken);
     }
 }

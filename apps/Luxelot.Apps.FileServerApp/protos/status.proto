@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Apps.FileServerApp.Messages";
+
+message Status
+ {
+    Operation operation = 1;
+    int32 status_code = 2;
+    string status_message = 3;
+    bytes result_payload = 4;
+}
+
+enum Operation {
+    NONE = 0;
+    AUTHENTICATION = 1;
+}

@@ -24,18 +24,29 @@ namespace Luxelot.Apps.FileServerApp.Messages {
     static AuthUserBeginReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "ChVhdXRoX3VzZXJfYmVnaW4ucHJvdG8iIgoNQXV0aFVzZXJCZWdpbhIRCglw",
-            "cmluY2lwYWwYASABKAxCJqoCI0x1eGVsb3QuQXBwcy5GaWxlU2VydmVyQXBw",
-            "Lk1lc3NhZ2VzYgZwcm90bzM="));
+            "ChVhdXRoX3VzZXJfYmVnaW4ucHJvdG8ihwEKDUF1dGhVc2VyQmVnaW4SEQoJ",
+            "cHJpbmNpcGFsGAEgASgMEj4KG2luaXRpYWxfdXNlcl9jaGFsbGVuZ2VfdHlw",
+            "ZRgCIAEoDjIZLkluaXRpYWxVc2VyQ2hhbGxlbmdlVHlwZRIjChtpbml0aWFs",
+            "X3VzZXJfY2hhbGxlbmdlX2RhdGEYAyABKAwqMgoYSW5pdGlhbFVzZXJDaGFs",
+            "bGVuZ2VUeXBlEggKBE5PTkUQABIMCghQQVNTV09SRBABQiaqAiNMdXhlbG90",
+            "LkFwcHMuRmlsZVNlcnZlckFwcC5NZXNzYWdlc2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
-          new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FileServerApp.Messages.AuthUserBegin), global::Luxelot.Apps.FileServerApp.Messages.AuthUserBegin.Parser, new[]{ "Principal" }, null, null, null, null)
+          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType), }, null, new pbr::GeneratedClrTypeInfo[] {
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FileServerApp.Messages.AuthUserBegin), global::Luxelot.Apps.FileServerApp.Messages.AuthUserBegin.Parser, new[]{ "Principal", "InitialUserChallengeType", "InitialUserChallengeData" }, null, null, null, null)
           }));
     }
     #endregion
 
   }
+  #region Enums
+  public enum InitialUserChallengeType {
+    [pbr::OriginalName("NONE")] None = 0,
+    [pbr::OriginalName("PASSWORD")] Password = 1,
+  }
+
+  #endregion
+
   #region Messages
   public sealed partial class AuthUserBegin : pb::IMessage<AuthUserBegin>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
@@ -72,6 +83,8 @@ namespace Luxelot.Apps.FileServerApp.Messages {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public AuthUserBegin(AuthUserBegin other) : this() {
       principal_ = other.principal_;
+      initialUserChallengeType_ = other.initialUserChallengeType_;
+      initialUserChallengeData_ = other.initialUserChallengeData_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -93,6 +106,30 @@ namespace Luxelot.Apps.FileServerApp.Messages {
       }
     }
 
+    /// <summary>Field number for the "initial_user_challenge_type" field.</summary>
+    public const int InitialUserChallengeTypeFieldNumber = 2;
+    private global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType initialUserChallengeType_ = global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType.None;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType InitialUserChallengeType {
+      get { return initialUserChallengeType_; }
+      set {
+        initialUserChallengeType_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "initial_user_challenge_data" field.</summary>
+    public const int InitialUserChallengeDataFieldNumber = 3;
+    private pb::ByteString initialUserChallengeData_ = pb::ByteString.Empty;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public pb::ByteString InitialUserChallengeData {
+      get { return initialUserChallengeData_; }
+      set {
+        initialUserChallengeData_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -109,6 +146,8 @@ namespace Luxelot.Apps.FileServerApp.Messages {
         return true;
       }
       if (Principal != other.Principal) return false;
+      if (InitialUserChallengeType != other.InitialUserChallengeType) return false;
+      if (InitialUserChallengeData != other.InitialUserChallengeData) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -117,6 +156,8 @@ namespace Luxelot.Apps.FileServerApp.Messages {
     public override int GetHashCode() {
       int hash = 1;
       if (Principal.Length != 0) hash ^= Principal.GetHashCode();
+      if (InitialUserChallengeType != global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType.None) hash ^= InitialUserChallengeType.GetHashCode();
+      if (InitialUserChallengeData.Length != 0) hash ^= InitialUserChallengeData.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -139,6 +180,14 @@ namespace Luxelot.Apps.FileServerApp.Messages {
         output.WriteRawTag(10);
         output.WriteBytes(Principal);
       }
+      if (InitialUserChallengeType != global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType.None) {
+        output.WriteRawTag(16);
+        output.WriteEnum((int) InitialUserChallengeType);
+      }
+      if (InitialUserChallengeData.Length != 0) {
+        output.WriteRawTag(26);
+        output.WriteBytes(InitialUserChallengeData);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -153,6 +202,14 @@ namespace Luxelot.Apps.FileServerApp.Messages {
         output.WriteRawTag(10);
         output.WriteBytes(Principal);
       }
+      if (InitialUserChallengeType != global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType.None) {
+        output.WriteRawTag(16);
+        output.WriteEnum((int) InitialUserChallengeType);
+      }
+      if (InitialUserChallengeData.Length != 0) {
+        output.WriteRawTag(26);
+        output.WriteBytes(InitialUserChallengeData);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -165,6 +222,12 @@ namespace Luxelot.Apps.FileServerApp.Messages {
       int size = 0;
       if (Principal.Length != 0) {
         size += 1 + pb::CodedOutputStream.ComputeBytesSize(Principal);
+      }
+      if (InitialUserChallengeType != global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType.None) {
+        size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) InitialUserChallengeType);
+      }
+      if (InitialUserChallengeData.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeBytesSize(InitialUserChallengeData);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -180,6 +243,12 @@ namespace Luxelot.Apps.FileServerApp.Messages {
       }
       if (other.Principal.Length != 0) {
         Principal = other.Principal;
+      }
+      if (other.InitialUserChallengeType != global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType.None) {
+        InitialUserChallengeType = other.InitialUserChallengeType;
+      }
+      if (other.InitialUserChallengeData.Length != 0) {
+        InitialUserChallengeData = other.InitialUserChallengeData;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -200,6 +269,14 @@ namespace Luxelot.Apps.FileServerApp.Messages {
             Principal = input.ReadBytes();
             break;
           }
+          case 16: {
+            InitialUserChallengeType = (global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType) input.ReadEnum();
+            break;
+          }
+          case 26: {
+            InitialUserChallengeData = input.ReadBytes();
+            break;
+          }
         }
       }
     #endif
@@ -217,6 +294,14 @@ namespace Luxelot.Apps.FileServerApp.Messages {
             break;
           case 10: {
             Principal = input.ReadBytes();
+            break;
+          }
+          case 16: {
+            InitialUserChallengeType = (global::Luxelot.Apps.FileServerApp.Messages.InitialUserChallengeType) input.ReadEnum();
+            break;
+          }
+          case 26: {
+            InitialUserChallengeData = input.ReadBytes();
             break;
           }
         }

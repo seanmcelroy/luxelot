@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Luxelot.App.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;

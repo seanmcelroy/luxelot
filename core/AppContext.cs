@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Google.Protobuf;
+using Luxelot.App.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
@@ -101,6 +102,9 @@ public class AppContext : IAppContext
 
     public (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey) => CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(publicKey);
 
+    public ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey) =>
+        CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey);
+
     public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class
     {
         if (Singletons.ContainsKey(typeof(T)))
@@ -118,8 +122,23 @@ public class AppContext : IAppContext
             value = null;
             return false;
         }
-        
+
         value = (T)v;
         return success;
+    }
+
+    public Envelope EncryptEnvelope(byte[] envelope_payload_bytes, ImmutableArray<byte> sessionSharedKey, ILogger? logger)
+    {
+        ArgumentNullException.ThrowIfNull(envelope_payload_bytes);
+        ArgumentNullException.ThrowIfNull(sessionSharedKey);
+
+        return CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, sessionSharedKey, logger);
+    }
+
+    public byte[]? DecryptEnvelope(Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger) {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(sessionSharedKey);
+
+        return CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
     }
 }

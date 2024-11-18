@@ -4,4 +4,11 @@ option csharp_namespace = "Luxelot.Apps.FileServerApp.Messages";
 
 message AuthUserBegin {
     bytes principal = 1;
+    InitialUserChallengeType initial_user_challenge_type = 2;
+    bytes initial_user_challenge_data = 3;
+}
+
+enum InitialUserChallengeType {
+    NONE = 0;
+    PASSWORD = 1;
 }

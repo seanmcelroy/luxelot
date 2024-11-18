@@ -396,7 +396,7 @@ public partial class Node
                 using (Logger.BeginScope("New Peer {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint))
                 {
                     Logger.LogDebug("New peer connection from {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint);
-                    var peer = Peer.CreatePeerFromAccept(peerTcpClient, Logger);
+                    var peer = Peer.CreatePeerFromAccept(peerTcpClient);
                     _ = Peers.TryAdd(peer.RemoteEndPoint!, peer);
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
                     {
@@ -478,7 +478,7 @@ public partial class Node
                 {
                     var peer_tcp_info = IPGlobalProperties.GetIPGlobalProperties()
                             .GetActiveTcpConnections()
-                            .SingleOrDefault(x => x.LocalEndPoint.Equals(peer.LocalEndPoint)
+                            .FirstOrDefault(x => x.LocalEndPoint.Equals(peer.LocalEndPoint)
                                                 && x.RemoteEndPoint.Equals(peer.RemoteEndPoint)
                             );
                     var peer_state = peer_tcp_info != null ? peer_tcp_info.State : TcpState.Unknown;
