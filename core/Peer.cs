@@ -339,6 +339,8 @@ internal class Peer : IDisposable
     #region Handle Messages
     internal async Task<bool> HandleSyn(NodeContext nodeContext, CancellationToken cancellationToken)
     {
+        using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleSyn)} from {RemoteEndPoint}");
+
         ArgumentNullException.ThrowIfNull(nodeContext);
 
         State = PeerState.SYN_RECEIVED;
@@ -375,7 +377,6 @@ internal class Peer : IDisposable
             return false;
         }
 
-        using var scope = nodeContext.Logger?.BeginScope("Process Syn from {RemoteEndPoint}", RemoteEndPoint);
         if (SessionSharedKey != null) {
             nodeContext.Logger?.LogError("Session shared key already calculated processing Syn from {RemoteEndPoint}! Closing.", RemoteEndPoint);
             Client.Close();
@@ -415,6 +416,8 @@ internal class Peer : IDisposable
 
     internal async Task<bool> HandleAck(NodeContext nodeContext, CancellationToken cancellationToken)
     {
+        using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleAck)} from {RemoteEndPoint}");
+
         // Here we will get what we need to compute the shared secret.
         // At the start of this, we should NOT have any identity key, as that comes in the Ack.
         if (IdentityPublicKey != null)
@@ -465,8 +468,6 @@ internal class Peer : IDisposable
             return false;
         }
 
-        using var scope = nodeContext.Logger?.BeginScope("Process Ack from {RemoteEndPoint}", RemoteEndPoint);
-
         // Shared Key
         if (SessionSharedKey != null)
             throw new InvalidOperationException("Shared key already computed!");
@@ -489,6 +490,8 @@ internal class Peer : IDisposable
 
     internal async Task<bool> HandleMessage(NodeContext nodeContext, ImmutableArray<byte> sourceThumbprint, Any message, CancellationToken cancellationToken)
     {
+        using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleMessage)} from {DisplayUtils.BytesToHex(sourceThumbprint)[..8]} ({RemoteEndPoint})");
+
         ArgumentNullException.ThrowIfNull(nodeContext);
         ArgumentNullException.ThrowIfNull(sourceThumbprint);
         ArgumentNullException.ThrowIfNull(message);

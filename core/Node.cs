@@ -24,6 +24,7 @@ public partial class Node
     public const uint NODE_PROTOCOL_VERSION = 1;
 
     private readonly ILogger Logger;
+    public required IPAddress ListenAddress { get; init; } = IPAddress.Any;
     public required int PeerPort { get; init; }
     public required int UserPort { get; init; }
     public IPEndPoint[]? Phonebook { get; init; }
@@ -387,7 +388,7 @@ public partial class Node
     {
         try
         {
-            using TcpListener peer_listener = new(IPAddress.Any, PeerPort);
+            using TcpListener peer_listener = new(ListenAddress, PeerPort);
             peer_listener.Start();
             Logger.LogInformation("Listening for peers at {LocalEndpoint}", peer_listener.LocalEndpoint);
             while (!cancellationToken.IsCancellationRequested)
