@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using System.Text;
 using Google.Protobuf;
 using Luxelot.App.Common.Messages;
 using Microsoft.Extensions.Logging;
@@ -272,4 +273,92 @@ public static class CryptoUtils
         sourceVerify.Init(false, parms);
         return sourceVerify.VerifySignature(message, signature);
     }
+
+
+    private const string DEFAULT_CHARACTER_SET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    public static string ConvertToBase62(this byte[] arr)
+    {
+        var converted = BaseConvert(arr, 256, 62);
+        var builder = new StringBuilder();
+        foreach (var c in converted)
+        {
+            builder.Append(DEFAULT_CHARACTER_SET[c]);
+        }
+        return builder.ToString();
+    }
+
+    public static byte[] ConvertFromBase62(this string base62)
+    {
+        var arr = new byte[base62.Length];
+        for (var i = 0; i < arr.Length; i++)
+        {
+            arr[i] = (byte)DEFAULT_CHARACTER_SET.IndexOf(base62[i]);
+        }
+
+        return BaseConvert(arr, 62, 256);
+    }
+
+    /// <summary>
+    /// Converts source byte array from the source base to the destination base.
+    /// </summary>
+    /// <param name="source">Byte array to convert.</param>
+    /// <param name="sourceBase">Source base to convert from.</param>
+    /// <param name="targetBase">Target base to convert to.</param>
+    /// <returns>Converted byte array.</returns>
+    private static byte[] BaseConvert(byte[] source, int sourceBase, int targetBase)
+    {
+        if (targetBase < 2 || targetBase > 256)
+            throw new ArgumentOutOfRangeException(nameof(targetBase), targetBase, "Value must be between 2 & 256 (inclusive)");
+
+        if (sourceBase < 2 || sourceBase > 256)
+            throw new ArgumentOutOfRangeException(nameof(sourceBase), sourceBase, "Value must be between 2 & 256 (inclusive)");
+
+        // Set initial capacity estimate if the size is small.
+        var startCapacity = source.Length < 1028
+            ? (int)(source.Length * 1.5)
+            : source.Length;
+
+        var result = new List<int>(startCapacity);
+        var quotient = new List<byte>((int)(source.Length * 0.5));
+        int count;
+        int initialStartOffset = 0;
+
+        // This is a bug fix for the following issue:
+        // https://github.com/ghost1face/base62/issues/4
+        while (source[initialStartOffset] == 0)
+        {
+            result.Add(0);
+            initialStartOffset++;
+        }
+
+        int startOffset = initialStartOffset;
+
+        while ((count = source.Length) > 0)
+        {
+            quotient.Clear();
+            int remainder = 0;
+            for (var i = initialStartOffset; i != count; i++)
+            {
+                int accumulator = source[i] + remainder * sourceBase;
+                byte digit = (byte)((accumulator - (accumulator % targetBase)) / targetBase);
+                remainder = accumulator % targetBase;
+                if (quotient.Count > 0 || digit != 0)
+                {
+                    quotient.Add(digit);
+                }
+            }
+
+            result.Insert(startOffset, remainder);
+            source = quotient.ToArray();
+            initialStartOffset = 0;
+        }
+
+        var output = new byte[result.Count];
+
+        for (int i = 0; i < result.Count; i++)
+            output[i] = (byte)result[i];
+
+        return output;
+    }
+
 }

@@ -17,3 +17,51 @@ This is a very alpha concept build.
 Running this spins up three nodes listening for user connections on 8000, 8001, and 8002, respectively, among nodes referred to herein as Alice, Bob, and Carol.  These nodes listen for node-to-node connections on 9000, 9001, and 9002, respectively.  
 
 Type "help" after connecting to node listening at 8001 (Bob) using a tool like telnet, then type ? for a list of commands or type "peers" to see a list of peers.  Alice connects to Bob, and Bob connects to Carol, so from Bob's vantage point, peers should display two peers.  Another command you can try is "ping" which implements a simple ping-pong internal reply.
+
+### Configuration
+
+Luxelot runs as a host console application and reads settings from appsettings.json.  This console host can load any number of nodes, though the typical configuration would be a single node.  This file can also set logging parameters.  An example is provided below:
+
+```json
+{
+  "NoPassword": true,
+  "Nodes": {
+    "Instances": {
+      "Alice": {
+        "ListenAddress": "0.0.0.0",
+        "PeerPort": 9000,
+        "UserPort": 8000,
+        "KnownPeers": [
+          "127.0.0.1:9001"
+        ],
+        "KeyContainer": "alice"
+      },
+      "Bob": {
+        "ListenAddress": "0.0.0.0",
+        "PeerPort": 9001,
+        "UserPort": 8001,
+        "KnownPeers": [
+          "127.0.0.1:9002"
+        ],
+      }
+    }
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "None"
+    },
+    "Console": {
+      "IncludeScopes": true,
+      "LogLevel": {
+        "Default": "Debug"
+      }
+    }
+  }
+}
+```
+
+This example creates two listening nodes and informs Alice of Bob so that she can connect.  This allows testing a small closed environment.
+
+The `KeyContainer` parameter is the file into which to save the cryptographic key material for the node.  This file is saved into AppData/luxelot/{KeyContainer}.{RandomExtension}, which on Linux is the ~/.config/luxelot path.  The extension contains data (an IV/salt) used to decrypt the file's contents and must not be changed on the file system or else decryption will fail.  In this example, node "bob" does not specify a key container, and so that node's key material will be recreated on every program run.
+
+The `NoPassword` option sets the password to the literal value "insecure", which can be used to run luxelot headless or without an external terminal when debugging in vscode/vscodium.

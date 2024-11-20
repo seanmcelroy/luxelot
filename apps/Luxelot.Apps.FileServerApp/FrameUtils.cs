@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
 using Luxelot.App.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.FileServerApp.Messages;

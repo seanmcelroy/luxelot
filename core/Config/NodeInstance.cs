@@ -6,4 +6,5 @@ public sealed class NodeInstance
     public required ushort PeerPort { get; set; }
     public required ushort UserPort { get; set; }
     public required string[] KnownPeers { get; set; }
+    public string? KeyContainer { get; set; }
 }

@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Net;
-using Google.Protobuf;
 
 namespace Luxelot.Apps.Common;
 

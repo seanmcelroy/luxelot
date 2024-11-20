@@ -11,10 +11,12 @@ using System.Text.RegularExpressions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
+using Luxelot.Config;
 using Luxelot.Messages;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 
 namespace Luxelot;
@@ -53,6 +55,24 @@ public partial class Node
     readonly List<IConsoleCommand> ConsoleCommands = [];
     //readonly List<IClientApp> ClientApps = [];
 
+    private Node(ILoggerFactory loggerFactory, AsymmetricCipherKeyPair acp)
+    {
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(acp);
+
+        IdentityKeys = acp;
+        var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)IdentityKeys.Public).GetEncoded();
+        IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
+        IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
+        Name = DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint);
+        ShortName = $"{Name[..8]}...";
+        Logger = loggerFactory.CreateLogger($"Node {ShortName}");
+
+        Logger.LogInformation("Recreated node with identity key thumbprint {Thumbprint}", Name);
+
+        ThumbprintPeerPaths = new(new MemoryCacheOptions { }, loggerFactory);
+        Logger.LogInformation("Setup memory caches");
+    }
 
     public Node(ILoggerFactory loggerFactory, string? shortName)
     {
@@ -78,6 +98,58 @@ public partial class Node
 
         ThumbprintPeerPaths = new(new MemoryCacheOptions { }, loggerFactory);
         Logger.LogInformation("Setup memory caches");
+    }
+
+    internal static Node? CreateFromEncryptedKeyContainer(
+        ILogger logger,
+        ILoggerFactory nodeLoggerFactory,
+        byte[] encryptedKeyContainer,
+        string salt62,
+        string password,
+        IPAddress listenAddress,
+        ushort peerPort,
+        ushort userPort,
+        IPEndPoint[]? phonebook)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(nodeLoggerFactory);
+        ArgumentNullException.ThrowIfNull(encryptedKeyContainer);
+        ArgumentNullException.ThrowIfNull(salt62);
+        ArgumentNullException.ThrowIfNull(password);
+
+        var passphrase_bytes = Encoding.UTF8.GetBytes(password);
+        var salt = salt62.ConvertFromBase62();
+        if (salt.Length != 16)
+            throw new ArgumentException("Salt must be 16 bytes", nameof(salt62));
+
+        var aes = Aes.Create();
+        var pbk = SCrypt.Generate(passphrase_bytes, salt, 1048576, 8, 1, aes.KeySize / 8);
+        aes.Key = pbk;
+        byte[] jsonBytes;
+        try
+        {
+            jsonBytes = aes.DecryptCbc(encryptedKeyContainer, salt, PaddingMode.PKCS7);
+        }
+        catch (CryptographicException ce)
+        {
+            logger.LogError(ce, "Node creation failed; unable to decrypt key container.");
+            return null;
+        }
+        var json = Encoding.UTF8.GetString(jsonBytes);
+        var kc = System.Text.Json.JsonSerializer.Deserialize<KeyContainer>(json) ?? throw new InvalidOperationException("Unable to deserialize key container");
+
+        var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, Convert.FromBase64String(kc.PublicKeyBase64));
+        var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, Convert.FromBase64String(kc.PrivateKeyBase64), pub);
+
+        var identityKeys = new AsymmetricCipherKeyPair(pub, pri);
+
+        return new Node(nodeLoggerFactory, identityKeys)
+        {
+            ListenAddress = listenAddress,
+            PeerPort = peerPort,
+            UserPort = userPort,
+            Phonebook = phonebook,
+        };
     }
 
     public async void Main(CancellationToken cancellationToken)
@@ -878,7 +950,8 @@ public partial class Node
         return (false, false);
     }
 
-    public bool TryAddThumbprintSignatureCache(ImmutableArray<byte> thumbprint, ImmutableArray<byte> publicKey) {
+    public bool TryAddThumbprintSignatureCache(ImmutableArray<byte> thumbprint, ImmutableArray<byte> publicKey)
+    {
         ArgumentNullException.ThrowIfNull(thumbprint);
         ArgumentNullException.ThrowIfNull(publicKey);
 
@@ -890,7 +963,7 @@ public partial class Node
         // Verify these match - be paranoid.
         if (!Enumerable.SequenceEqual(thumbprint, SHA256.HashData([.. publicKey])))
             return false;
-    
+
         return ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(thumbprint), publicKey);
     }
 
@@ -917,6 +990,31 @@ public partial class Node
             Logger?.LogError(ex, "Unable to write message to user. Closing.");
             User.Close();
         }
+    }
+
+    public (byte[] enc, string salt62) ExportKeyContainer(string password)
+    {
+        var nodeIdPrivateKey = (DilithiumPrivateKeyParameters)IdentityKeys.Private;
+
+        var kc = new KeyContainer
+        {
+            PublicKeyBase64 = Convert.ToBase64String([.. IdentityKeyPublicBytes]),
+            PrivateKeyBase64 = Convert.ToBase64String([.. nodeIdPrivateKey.GetEncoded()])
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(kc);
+        var jsonBytes = Encoding.UTF8.GetBytes(json);
+
+        var passphrase_bytes = Encoding.UTF8.GetBytes(password);
+        var salt = new byte[16];
+        RandomNumberGenerator.Fill(salt);
+
+        var aes = Aes.Create();
+        var pbk = SCrypt.Generate(passphrase_bytes, salt, 1048576, 8, 1, aes.KeySize / 8);
+        aes.Key = pbk;
+        var encrypted = aes.EncryptCbc(jsonBytes, salt, PaddingMode.PKCS7);
+
+        return (encrypted, salt.ConvertToBase62());
     }
 
     [GeneratedRegex("(?:^|\\s)(\\\"(?:[^\\\"])*\\\"|[^\\s]*)")]
