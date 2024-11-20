@@ -2,7 +2,7 @@
 
 ## Summary
 
-Luxelot is a peer-to-peer (p2p) network for establishing encrypted channels between nodes and passing messages between them.  Luxelot exclusively uses post-quantum cryptography (PQC).
+Luxelot is a peer-to-peer (p2p) network for establishing encrypted channels between nodes and passing messages between them.  Luxelot exclusively uses post-quantum cryptography (PQC) for all network exchanges.
 
 ## News
 
@@ -23,6 +23,12 @@ Peers establish shared secrets using the CRYSTALS Kyber Key Encapsulation Mechan
 Messages directly shared between neighboring nodes and those forwarded across the network between remote nodes are signed by the Dilithum key of the sender.  While forwarded messages are not E2EE encrypted, Apps can define their own key exchange messages and implement E2EE as a feature of their app protocol design on top of Luxelot.  (The in-development file server app does this.)
 
 Nodes are aware of the Dilithium public keys of their direct neighbors, but may also learn the public keys of remote nodes if they are shared in forwarded messages.  The thumbprint of a node, a SHA256 hash of a node's public Dilithium key, is shared as the source of messages.  When a node is aware of a sender's public key, either through a direct neighbor handshake or inference from monitoring messages, it will verify signatures of forwarded messages traversing it and will not pass corrupted messages that do not have a signature matching the matching thumbprint it knows.
+
+Bouncy Castle is used for all post-quantum cryptography usage.
+
+### Message Protocol
+
+Messages are encoded using Protocol Buffers (proto3), and are defined in .proto files in the projects that own them.
 
 ### Anonymity
 
@@ -91,3 +97,14 @@ This example creates two listening nodes and informs Alice of Bob so that she ca
 The `KeyContainer` parameter is the file into which to save the cryptographic key material for the node.  This file is saved into AppData/luxelot/{KeyContainer}.{RandomExtension}, which on Linux is the ~/.config/luxelot path.  The extension contains data (an IV/salt) used to decrypt the file's contents and must not be changed on the file system or else decryption will fail.  In this example, node "bob" does not specify a key container, and so that node's key material will be recreated on every program run.
 
 The `NoPassword` option sets the password to the literal value "insecure", which can be used to run luxelot headless or without an external terminal when debugging in vscode/vscodium.
+
+## FAQs
+
+1. Why did you use C# and dotnet?  Wouldn't go or rust be more exciting or better choices for a network application?
+
+Maybe!  I like C# and dotnet on Linux.  Darknets are weird.  I'm weird.  I may rewrite this in some other language someday, but at this stage, I want to prototype quickly in a mature language I know well, so here we are.  By using protobufs and not a custom binary protocol of my making, I'm hopeful that with interface stability, anyone can implement Luxelot in any language and toolkit of their choosing that supports proto3 and post-quantum cryptography.
+
+2. How are keys protected on the local system?
+
+Key containers are encrypted with AES-256 on the local system.  Random bits are used to create an IV/salt value.  It is supplied as a salt with a user-supplied password to ```scrypt``` (a password-based key derivation function) to generate keying material for AES-256.  The same random bits are used as an IV along with this keying material to encrypt the Dilithium keys into a file.  The IV/salt are only ever used to encrypt the key container once and this file is never modified and re-encrypted with the same IV/salt.  Perhaps someday this will get upgraded to Argon2id.
+

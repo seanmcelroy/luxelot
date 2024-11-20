@@ -7,7 +7,6 @@ using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
@@ -18,10 +17,11 @@ using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
+using static Luxelot.Apps.Common.RegexUtils;
 
 namespace Luxelot;
 
-public partial class Node
+public class Node
 {
     public const uint NODE_PROTOCOL_VERSION = 1;
 
@@ -52,16 +52,17 @@ public partial class Node
     public string ShortName { get; init; }
 
     // Plug-ins
-    readonly List<IServerApp> ServerApps = [];
-    readonly List<IConsoleCommand> ConsoleCommands = [];
-    //readonly List<IClientApp> ClientApps = [];
+    private readonly List<IServerApp> ServerApps = [];
+    private readonly List<IConsoleCommand> ConsoleCommands = [];
+    private readonly List<IClientApp> ClientApps = [];
+    private IClientApp? ActiveClientApp = null;
+
 
     private Node(ILoggerFactory loggerFactory, AsymmetricCipherKeyPair acp)
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
         ArgumentNullException.ThrowIfNull(acp);
 
-        //IdentityKeys = acp;
         var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)acp.Public).GetEncoded();
         IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
         IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
@@ -356,7 +357,7 @@ public partial class Node
                 Logger.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
             }
 
-            /*/ Load Client Apps
+            // Load Client Apps
             var clientAppTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IClientApp).FullName) == 0)).ToArray();
             foreach (var clientAppType in clientAppTypes)
             {
@@ -370,10 +371,10 @@ public partial class Node
                     continue;
                 }
 
-                clientApp.OnNodeInitialize(appContext);
+                clientApp.OnInitialize(appContext);
                 ClientApps.Add(clientApp);
                 Logger.LogInformation("Loaded client app {AppName} ({TypeName})", clientApp.Name, clientAppType.FullName);
-            }*/
+            }
         }
     }
 
@@ -648,9 +649,23 @@ public partial class Node
         if (input.Length == 0)
             return;
 
-        //Logger.LogTrace($"USER INPUT: '{input}'");
         var words = QuotedWordArrayRegex().Split(input).Where(s => s.Length > 0).ToArray();
         var command = words.First();
+
+        if (ActiveClientApp != null)
+        {
+            switch (command.ToLowerInvariant())
+            {
+                case "exit":
+                case "quit":
+                    await context.WriteLineToUserAsync($"\r\nExited app {ActiveClientApp.Name}", cancellationToken);
+                    ActiveClientApp = null;
+                    return;
+                default:
+                    await ActiveClientApp.HandleUserInput(input, cancellationToken);
+                    return;
+            }
+        }
 
         switch (command.ToLowerInvariant())
         {
@@ -658,11 +673,14 @@ public partial class Node
             case "help":
                 await context.WriteLineToUserAsync("\r\nCommand List", cancellationToken);
                 var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers", "shutdown" };
-                var cmd_string = built_in_cmds
+                await context.WriteLineToUserAsync(built_in_cmds
                     .Union(ConsoleCommands.Select(cc => cc.Command.ToLowerInvariant()).ToArray())
                     .Order()
-                    .Aggregate((c, n) => $"{c}\r\n{n}");
-                await context.WriteLineToUserAsync(cmd_string, cancellationToken);
+                    .Aggregate((c, n) => $"{c}\r\n{n}"), cancellationToken);
+                await context.WriteLineToUserAsync("\r\nAvailable modules:", cancellationToken);
+                await context.WriteLineToUserAsync(ClientApps.Select(ca => ca.InteractiveCommand.ToLowerInvariant())
+                    .Order()
+                    .Aggregate((c, n) => $"{c}\r\n{n}"), cancellationToken);
                 await context.WriteLineToUserAsync("End of Command List", cancellationToken);
                 break;
 
@@ -746,14 +764,26 @@ public partial class Node
                 break;
 
             default:
+                // Maybe it's a command we loaded?
                 var appCommand = ConsoleCommands.FirstOrDefault(cc => string.Compare(cc.Command, command, StringComparison.InvariantCultureIgnoreCase) == 0);
-                if (appCommand == null)
+                if (appCommand != null)
                 {
-                    await context.WriteLineToUserAsync($"Huh?", cancellationToken);
+                    var success = await appCommand.Invoke(words, cancellationToken);
                     return;
                 }
 
-                var success = await appCommand.Invoke(words, cancellationToken);
+                // Maybe it's a client app that has an interactive mode?
+                var clientAppCommand = ClientApps.FirstOrDefault(ca => string.Compare(ca.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
+                if (clientAppCommand != null)
+                {
+                    ActiveClientApp = clientAppCommand;
+                    await clientAppCommand.OnActivate(cancellationToken);
+                    return;
+                }
+
+
+
+                await context.WriteLineToUserAsync($"Huh?", cancellationToken);
                 break;
         }
     }
@@ -1024,7 +1054,4 @@ public partial class Node
 
         return (encrypted, salt.ConvertToBase62());
     }
-
-    [GeneratedRegex("(?:^|\\s)(\\\"(?:[^\\\"])*\\\"|[^\\s]*)")]
-    private static partial Regex QuotedWordArrayRegex();
 }

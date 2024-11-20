@@ -1,10 +1,12 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Google.Protobuf;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.FileServerApp.Messages;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
+using static Luxelot.Apps.Common.RegexUtils;
 
 namespace Luxelot.Apps.FileServerApp;
 
@@ -25,12 +27,22 @@ public class FileClientApp : IClientApp
 
     public string Name => "Fserve Client";
 
+    public string InteractiveCommand => "fs";
+
     public void OnInitialize(IAppContext appContext)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         this.appContext = appContext;
 
         Reset();
+    }
+
+    public async Task OnActivate(CancellationToken cancellationToken)
+    {
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        await appContext.SendConsoleMessage("fserve client 0.0.1", cancellationToken);
     }
 
     public void Reset()
@@ -137,5 +149,35 @@ public class FileClientApp : IClientApp
 
         await appContext.SendConsoleMessage($"FSERVE Status: {status.StatusCode} {status.StatusMessage}", cancellationToken);
         return true;
+    }
+
+    public async Task<bool> HandleUserInput(string input, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(appContext);
+        ArgumentNullException.ThrowIfNull(input);
+
+        var words = QuotedWordArrayRegex().Split(input).Where(s => s.Length > 0).ToArray();
+        var command = words.First();
+
+        switch (command.ToLowerInvariant())
+        {
+            case "?":
+            case "help":
+                await appContext.SendConsoleMessage($"\r\n{InteractiveCommand}> Command List", cancellationToken);
+                var built_in_cmds = new string[] { "exit", "login" };
+                var cmd_string = built_in_cmds.Order()
+                    .Aggregate((c, n) => $"{InteractiveCommand}> {c}\r\n{InteractiveCommand}> {n}");
+                await appContext.SendConsoleMessage(cmd_string, cancellationToken);
+                await appContext.SendConsoleMessage($"{InteractiveCommand}> End of Command List", cancellationToken);
+                return true;
+
+            case "login":
+                var fsLogin = new LoginCommand();
+                fsLogin.OnInitialize(appContext);
+                return await fsLogin.Invoke(words, cancellationToken);
+            default:
+                await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command {command}. Type 'exit' to exit this app.", cancellationToken);
+                return false;
+        }
     }
 }
