@@ -4,11 +4,37 @@
 
 Luxelot is a peer-to-peer (p2p) network for establishing encrypted channels between nodes and passing messages between them.  Luxelot exclusively uses post-quantum cryptography (PQC).
 
+## News
+
+This is a very, very alpha project.  Simple things like direct P2P connections using explicit address configuration work, as do some very simple concepts like "ping"/"pong".  There's not much else to this project yet, but more is planned.  A simple file transfer service implemented as an app (see Apps under Concepts below) is the current active focus to exemplify the potential of the project.
+
 ## Concepts
+
+### Apps
+
+Luxelot has the concept of loadable modules, called "apps" which either provide custom message handling or dispatch and/or custom console commands.  A simple "ping" app is included which implements an application-level ping/pong request and response either with a direct neigherboring peer or through a directed broadcast across the network.  Each app in this solution is a separate .NET project under the apps project.  Each app copies its build outputs into the "core" console project's build output directory.  The core console host dynamically loads each app on start-up, which allows apps to be independently developed and tested.
+
+### Cryptography
 
 Nodes generate an identity in the form of a CRYSTALS Dilithium public key which is presented when handshaking with other peers and subsequently used to sign messages for forwarding around the network.  Nodes refer to network locations by the SHA-256 hash of their Dilithium public keys.
 
 Peers establish shared secrets using the CRYSTALS Kyber Key Encapsulation Mechanism (KEM).  Kyber is used only between neighboring peers to envelop messages for trading among peers.  Each p2p connection uses its own shared secret that has a lifetime only as long as that network connection between those two peers.
+
+Messages directly shared between neighboring nodes and those forwarded across the network between remote nodes are signed by the Dilithum key of the sender.  While forwarded messages are not E2EE encrypted, Apps can define their own key exchange messages and implement E2EE as a feature of their app protocol design on top of Luxelot.  (The in-development file server app does this.)
+
+Nodes are aware of the Dilithium public keys of their direct neighbors, but may also learn the public keys of remote nodes if they are shared in forwarded messages.  The thumbprint of a node, a SHA256 hash of a node's public Dilithium key, is shared as the source of messages.  When a node is aware of a sender's public key, either through a direct neighbor handshake or inference from monitoring messages, it will verify signatures of forwarded messages traversing it and will not pass corrupted messages that do not have a signature matching the matching thumbprint it knows.
+
+### Anonymity
+
+Luxelot is not designed (at this time) to provide anonymity.  Traffic analysis, for instance, may be used to identify the network topology or source of a message given enough time.
+
+### Discovery
+
+Luxelot does not yet have a discovery mechanism.  Nodes must be explicitly configured for P2P configurations.  Discovery is a future design goal for this project to allow new nodes to identify local peers on the same subnet, find remote peers in a directory, and publish its existance on the directory.  None of these features exist yet.
+
+### Overlay / Egress to the Interet
+
+Luxelot is a network of peer-to-peer nodes connected over the Internet.  However, Luxelot is not intended to provide onion routing or other relays to access the Internet through Luxelot.  For this reason, there are no proxy or other configurations that allow Luxelot to serve access to the public web or other Internet services.  Luxelot is more of a darknet in that it is a network of services and content, but not necessarily a dark web, since that content is not natively web-based or browser-accessible.
 
 ## How To
 
