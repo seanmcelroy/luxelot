@@ -1,14 +1,13 @@
 using System.Collections.Immutable;
-using System.Runtime.CompilerServices;
 using System.Text;
 using Google.Protobuf;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.FileServerApp.Messages;
+using Luxelot.Apps.FserveApp.Messages;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using static Luxelot.Apps.Common.RegexUtils;
 
-namespace Luxelot.Apps.FileServerApp;
+namespace Luxelot.Apps.FserveApp;
 
 /// <summary>
 /// This is a simple fserve client app which does not provide for multiple sessions or downloads.
@@ -72,9 +71,32 @@ public class FileClientApp : IClientApp
 
         return await appContext.SendMessage(destinationThumbprint, new AuthChannelBegin
         {
-            ProtVer = FileServerApp.FS_PROTOCOL_VERSION,
+            ProtVer = FserveApp.FS_PROTOCOL_VERSION,
             SessionPubKey = ByteString.CopyFrom([.. SessionPublicKey!]),
         }, cancellationToken);
+    }
+
+    public async Task<bool> SendListRequest(CancellationToken cancellationToken)
+    {
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        if (ServerThumbprint == null || SessionSharedKey == null) {
+            appContext.Logger?.LogInformation("Listing failed, no connection to a server");
+            await appContext.SendConsoleMessage($"Not connected to an fserve.", cancellationToken);
+            return false;
+        }
+
+        var frame = FrameUtils.WrapClientFrame(
+            appContext,
+            new ListRequest
+            {
+                Directory = string.Empty,
+                Pattern = string.Empty
+            },
+            SessionSharedKey.Value);
+
+        return await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken);
     }
 
     public async Task<bool> HandleAuthChannelResponse(IRequestContext requestContext, AuthChannelResponse acr, CancellationToken cancellationToken)
@@ -163,10 +185,10 @@ public class FileClientApp : IClientApp
         {
             case "?":
             case "help":
-                await appContext.SendConsoleMessage($"\r\n{InteractiveCommand}> Command List", cancellationToken);
-                var built_in_cmds = new string[] { "exit", "login" };
+                await appContext.SendConsoleMessage($"\r\n{InteractiveCommand}> Command List\r\n{InteractiveCommand} >", cancellationToken);
+                var built_in_cmds = new string[] { "exit", "login", "list"};
                 var cmd_string = built_in_cmds.Order()
-                    .Aggregate((c, n) => $"{InteractiveCommand}> {c}\r\n{InteractiveCommand}> {n}");
+                    .Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}");
                 await appContext.SendConsoleMessage(cmd_string, cancellationToken);
                 await appContext.SendConsoleMessage($"{InteractiveCommand}> End of Command List", cancellationToken);
                 return true;
@@ -175,6 +197,14 @@ public class FileClientApp : IClientApp
                 var fsLogin = new LoginCommand();
                 fsLogin.OnInitialize(appContext);
                 return await fsLogin.Invoke(words, cancellationToken);
+
+            case "dir":
+            case "ls":
+            case "list":
+                var fsList = new ListCommand();
+                fsList.OnInitialize(appContext);
+                return await fsList.Invoke(words, cancellationToken);
+
             default:
                 await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command {command}. Type 'exit' to exit this app.", cancellationToken);
                 return false;

@@ -11,7 +11,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "apps", "apps", "{936A2D51-C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Luxelot.Apps.PingApp", "apps\Luxelot.Apps.PingApp\Luxelot.Apps.PingApp.csproj", "{C75DDCC6-13F8-443C-A916-3E5EE5AB0793}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Luxelot.Apps.FileServerApp", "apps\Luxelot.Apps.FileServerApp\Luxelot.Apps.FileServerApp.csproj", "{569EA8EF-BB4A-4DC8-9523-16DCE0305279}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Luxelot.Apps.FserveApp", "apps\Luxelot.Apps.FserveApp\Luxelot.Apps.FserveApp.csproj", "{569EA8EF-BB4A-4DC8-9523-16DCE0305279}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

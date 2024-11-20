@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using Luxelot.Apps.Common;
 using Microsoft.Extensions.Logging;
 
-namespace Luxelot.Apps.FileServerApp;
+namespace Luxelot.Apps.FserveApp;
 
 public class LoginCommand : IConsoleCommand
 {

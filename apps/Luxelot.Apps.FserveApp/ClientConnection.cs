@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Text;
 
-namespace Luxelot.Apps.FileServerApp;
+namespace Luxelot.Apps.FserveApp;
 
 public class ClientConnection
 {

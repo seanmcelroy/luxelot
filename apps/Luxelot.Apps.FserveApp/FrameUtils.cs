@@ -2,9 +2,9 @@ using System.Collections.Immutable;
 using Google.Protobuf;
 using Luxelot.App.Common.Messages;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.FileServerApp.Messages;
+using Luxelot.Apps.FserveApp.Messages;
 
-namespace Luxelot.Apps.FileServerApp;
+namespace Luxelot.Apps.FserveApp;
 
 public static class FrameUtils
 {
@@ -41,6 +41,8 @@ public static class FrameUtils
             frameType = ClientFrameType.AuthUserBegin;
         else if (message is AuthUserResponse)
             frameType = ClientFrameType.AuthUserResponse;
+        else if (message is ListRequest)
+            frameType = ClientFrameType.ListRequest;
         else
             throw new NotImplementedException($"Unknown frame type: {message.GetType().FullName}");
 
@@ -71,6 +73,7 @@ public static class FrameUtils
         {
             ClientFrameType.AuthUserBegin => AuthUserBegin.Parser.ParseFrom(decrypted),
             ClientFrameType.AuthUserResponse => AuthUserResponse.Parser.ParseFrom(decrypted),
+            ClientFrameType.ListRequest => ListRequest.Parser.ParseFrom(decrypted),
             _ => throw new NotImplementedException($"Unknown frame type: {frame.FrameType}"),
         };
     }

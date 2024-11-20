@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option csharp_namespace = "Luxelot.Apps.FileServerApp.Messages";
+option csharp_namespace = "Luxelot.Apps.FserveApp.Messages";
 
 message AuthChannelBegin {
     uint32 prot_ver = 1;

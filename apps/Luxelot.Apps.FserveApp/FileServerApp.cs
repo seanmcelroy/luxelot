@@ -3,13 +3,13 @@ using System.Collections.Immutable;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.FileServerApp.Messages;
+using Luxelot.Apps.FserveApp.Messages;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 
-namespace Luxelot.Apps.FileServerApp;
+namespace Luxelot.Apps.FserveApp;
 
-public class FileServerApp : IServerApp
+public class FserveApp : IServerApp
 {
     public const uint FS_PROTOCOL_VERSION = 1;
 
@@ -62,6 +62,8 @@ public class FileServerApp : IServerApp
                     var innerMessage = FrameUtils.UnwrapFrame(appContext, frame, [.. cc.SessionSharedKey]);
                     if (innerMessage is AuthUserBegin aub)
                         return await HandleAuthUserBegin(requestContext, aub, cancellationToken);
+                    else if (innerMessage is ListRequest lr)
+                        return await HandleListRequest(requestContext, lr, cancellationToken);
                     else
                     {
                         appContext?.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Unsupported client frame type: {FrameType}", requestContext.PeerShortName, requestContext.RemoteEndPoint, innerMessage.GetType().FullName);
@@ -195,4 +197,44 @@ public class FileServerApp : IServerApp
 
         return await appContext.SendMessage(requestContext.RequestSourceThumbprint, frame, cancellationToken);
     }
+
+    private async Task<bool> HandleListRequest(IRequestContext requestContext, ListRequest lr, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestContext);
+        ArgumentNullException.ThrowIfNull(lr);
+
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
+        {
+            appContext.Logger?.LogDebug("ListRequest received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            return true;
+        }
+
+        appContext.Logger?.LogDebug("ListRequest from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+
+        // TODO: Server root
+
+        var entries = Directory.GetFileSystemEntries(
+            string.IsNullOrWhiteSpace(lr.Directory) ? "/" : lr.Directory,
+            string.IsNullOrWhiteSpace(lr.Pattern) ? "*" : lr.Pattern,
+            new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive })
+            .Order();
+
+        var frame = FrameUtils.WrapServerFrame(
+            appContext,
+            new Status
+            {
+                Operation = Operation.Authentication,
+                StatusCode = 200,
+                StatusMessage = $"TODO!",
+                ResultPayload = ByteString.Empty
+            },
+            cc.SessionSharedKey);
+
+        return await appContext.SendMessage(requestContext.RequestSourceThumbprint, frame, cancellationToken);
+    }
+
 }

@@ -9,7 +9,7 @@ using pb = global::Google.Protobuf;
 using pbc = global::Google.Protobuf.Collections;
 using pbr = global::Google.Protobuf.Reflection;
 using scg = global::System.Collections.Generic;
-namespace Luxelot.Apps.FileServerApp.Messages {
+namespace Luxelot.Apps.FserveApp.Messages {
 
   /// <summary>Holder for reflection information generated from client_frame.proto</summary>
   public static partial class ClientFrameReflection {
@@ -27,13 +27,13 @@ namespace Luxelot.Apps.FileServerApp.Messages {
             "ChJjbGllbnRfZnJhbWUucHJvdG8ifAoLQ2xpZW50RnJhbWUSDQoFbm9uY2UY",
             "ASABKAwSEgoKY2lwaGVydGV4dBgCIAEoDBILCgN0YWcYAyABKAwSFwoPYXNz",
             "b2NpYXRlZF9kYXRhGAQgASgMEiQKCmZyYW1lX3R5cGUYBSABKA4yEC5DbGll",
-            "bnRGcmFtZVR5cGUqOgoPQ2xpZW50RnJhbWVUeXBlEhEKDUF1dGhVc2VyQmVn",
-            "aW4QABIUChBBdXRoVXNlclJlc3BvbnNlEAFCJqoCI0x1eGVsb3QuQXBwcy5G",
-            "aWxlU2VydmVyQXBwLk1lc3NhZ2VzYgZwcm90bzM="));
+            "bnRGcmFtZVR5cGUqSwoPQ2xpZW50RnJhbWVUeXBlEhEKDUF1dGhVc2VyQmVn",
+            "aW4QABIUChBBdXRoVXNlclJlc3BvbnNlEAESDwoLTGlzdFJlcXVlc3QQAkIi",
+            "qgIfTHV4ZWxvdC5BcHBzLkZzZXJ2ZUFwcC5NZXNzYWdlc2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
-          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType), }, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FileServerApp.Messages.ClientFrame), global::Luxelot.Apps.FileServerApp.Messages.ClientFrame.Parser, new[]{ "Nonce", "Ciphertext", "Tag", "AssociatedData", "FrameType" }, null, null, null, null)
+          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.FserveApp.Messages.ClientFrameType), }, null, new pbr::GeneratedClrTypeInfo[] {
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.ClientFrame), global::Luxelot.Apps.FserveApp.Messages.ClientFrame.Parser, new[]{ "Nonce", "Ciphertext", "Tag", "AssociatedData", "FrameType" }, null, null, null, null)
           }));
     }
     #endregion
@@ -43,6 +43,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
   public enum ClientFrameType {
     [pbr::OriginalName("AuthUserBegin")] AuthUserBegin = 0,
     [pbr::OriginalName("AuthUserResponse")] AuthUserResponse = 1,
+    [pbr::OriginalName("ListRequest")] ListRequest = 2,
   }
 
   #endregion
@@ -62,7 +63,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Luxelot.Apps.FileServerApp.Messages.ClientFrameReflection.Descriptor.MessageTypes[0]; }
+      get { return global::Luxelot.Apps.FserveApp.Messages.ClientFrameReflection.Descriptor.MessageTypes[0]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -146,10 +147,10 @@ namespace Luxelot.Apps.FileServerApp.Messages {
 
     /// <summary>Field number for the "frame_type" field.</summary>
     public const int FrameTypeFieldNumber = 5;
-    private global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType frameType_ = global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType.AuthUserBegin;
+    private global::Luxelot.Apps.FserveApp.Messages.ClientFrameType frameType_ = global::Luxelot.Apps.FserveApp.Messages.ClientFrameType.AuthUserBegin;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType FrameType {
+    public global::Luxelot.Apps.FserveApp.Messages.ClientFrameType FrameType {
       get { return frameType_; }
       set {
         frameType_ = value;
@@ -187,7 +188,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
       if (Ciphertext.Length != 0) hash ^= Ciphertext.GetHashCode();
       if (Tag.Length != 0) hash ^= Tag.GetHashCode();
       if (AssociatedData.Length != 0) hash ^= AssociatedData.GetHashCode();
-      if (FrameType != global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType.AuthUserBegin) hash ^= FrameType.GetHashCode();
+      if (FrameType != global::Luxelot.Apps.FserveApp.Messages.ClientFrameType.AuthUserBegin) hash ^= FrameType.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -222,7 +223,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
         output.WriteRawTag(34);
         output.WriteBytes(AssociatedData);
       }
-      if (FrameType != global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType.AuthUserBegin) {
+      if (FrameType != global::Luxelot.Apps.FserveApp.Messages.ClientFrameType.AuthUserBegin) {
         output.WriteRawTag(40);
         output.WriteEnum((int) FrameType);
       }
@@ -252,7 +253,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
         output.WriteRawTag(34);
         output.WriteBytes(AssociatedData);
       }
-      if (FrameType != global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType.AuthUserBegin) {
+      if (FrameType != global::Luxelot.Apps.FserveApp.Messages.ClientFrameType.AuthUserBegin) {
         output.WriteRawTag(40);
         output.WriteEnum((int) FrameType);
       }
@@ -278,7 +279,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
       if (AssociatedData.Length != 0) {
         size += 1 + pb::CodedOutputStream.ComputeBytesSize(AssociatedData);
       }
-      if (FrameType != global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType.AuthUserBegin) {
+      if (FrameType != global::Luxelot.Apps.FserveApp.Messages.ClientFrameType.AuthUserBegin) {
         size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) FrameType);
       }
       if (_unknownFields != null) {
@@ -305,7 +306,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
       if (other.AssociatedData.Length != 0) {
         AssociatedData = other.AssociatedData;
       }
-      if (other.FrameType != global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType.AuthUserBegin) {
+      if (other.FrameType != global::Luxelot.Apps.FserveApp.Messages.ClientFrameType.AuthUserBegin) {
         FrameType = other.FrameType;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
@@ -340,7 +341,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
             break;
           }
           case 40: {
-            FrameType = (global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType) input.ReadEnum();
+            FrameType = (global::Luxelot.Apps.FserveApp.Messages.ClientFrameType) input.ReadEnum();
             break;
           }
         }
@@ -375,7 +376,7 @@ namespace Luxelot.Apps.FileServerApp.Messages {
             break;
           }
           case 40: {
-            FrameType = (global::Luxelot.Apps.FileServerApp.Messages.ClientFrameType) input.ReadEnum();
+            FrameType = (global::Luxelot.Apps.FserveApp.Messages.ClientFrameType) input.ReadEnum();
             break;
           }
         }

@@ -11,13 +11,13 @@
   </PropertyGroup>
 
   <Target Name="CopyDLLs" AfterTargets="Build">
-    <Message Text="Copying FileServerApp build outputs" Importance="High" />
+    <Message Text="Copying FserveApp build outputs" Importance="High" />
 
     <Copy
       SourceFiles="$(TargetDir)$(ProjectName).dll;$(TargetDir)$(ProjectName).pdb"
       DestinationFolder="../../core/bin/Debug/net8.0" />
 
-    <Message Text="Copied FileServerApp build outputs" Importance="High" />
+    <Message Text="Copied FserveApp build outputs" Importance="High" />
   </Target>
 
 </Project>
