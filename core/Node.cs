@@ -13,6 +13,8 @@ using Luxelot.Apps.Common;
 using Luxelot.Config;
 using Luxelot.Messages;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Generators;
@@ -25,7 +27,7 @@ public class Node
 {
     public const uint NODE_PROTOCOL_VERSION = 1;
 
-    private readonly ILogger Logger;
+    private readonly ILogger? Logger;
     public required IPAddress ListenAddress { get; init; } = IPAddress.Any;
     public required int PeerPort { get; init; }
     public required int UserPort { get; init; }
@@ -77,9 +79,11 @@ public class Node
         Logger.LogInformation("Setup memory caches");
     }
 
-    public Node(ILoggerFactory loggerFactory, string? shortName)
+    public Node(IHost host, string? shortName)
     {
-        ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(host);
+
+        var loggerFactory = (ILoggerFactory?)host.Services.GetService(typeof(ILoggerFactory));
 
         var acp = CryptoUtils.GenerateDilithiumKeyPair();
         var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)acp.Public).GetEncoded();
@@ -90,18 +94,20 @@ public class Node
         if (string.IsNullOrWhiteSpace(shortName))
         {
             ShortName = $"{Name[..8]}...";
-            Logger = loggerFactory.CreateLogger($"Node {ShortName}");
+            Logger = loggerFactory?.CreateLogger($"Node {ShortName}");
         }
         else
         {
             ShortName = shortName;
-            Logger = loggerFactory.CreateLogger($"Node {shortName}({Name[..8]}...)");
+            Logger = loggerFactory?.CreateLogger($"Node {shortName}({Name[..8]}...)");
         }
 
-        Logger.LogInformation("Generated node identity key with thumbprint {Thumbprint}", Name);
+        Logger?.LogInformation("Generated node identity key with thumbprint {Thumbprint}", Name);
 
-        ThumbprintPeerPaths = new(new MemoryCacheOptions { }, loggerFactory);
-        Logger.LogInformation("Setup memory caches");
+        ThumbprintPeerPaths = loggerFactory == null
+            ? new(new MemoryCacheOptions { })
+            : new(new MemoryCacheOptions { }, loggerFactory);
+        Logger?.LogInformation("Setup memory caches");
     }
 
     internal static Node? CreateFromEncryptedKeyContainer(
@@ -156,7 +162,7 @@ public class Node
         };
     }
 
-    public async void Main(CancellationToken cancellationToken)
+    public async void Main(IHost host, CancellationToken cancellationToken)
     {
         var nodeContext = new NodeContext(this)
         {
@@ -170,70 +176,77 @@ public class Node
 
         // Discover plugins
         var assemblyPath = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-        Logger.LogInformation("Looking for plugins to load in {AssemblyPath}", assemblyPath);
-        var potentialPlugins = Directory.EnumerateFiles(assemblyPath, "*App.dll").ToArray();
-        foreach (var potentialPlugin in potentialPlugins)
+        if (assemblyPath == null)
         {
-            await using var stream = File.OpenRead(potentialPlugin);
-            using var pe = new PEReader(stream);
-            if (pe.HasMetadata)
+            Logger?.LogWarning("Unable to determine assembly path.  Skipping plugin loads.");
+        }
+        else
+        {
+            Logger?.LogInformation("Looking for plugins to load in {AssemblyPath}", assemblyPath);
+            var potentialPlugins = Directory.EnumerateFiles(assemblyPath, "*App.dll").ToArray();
+            foreach (var potentialPlugin in potentialPlugins)
             {
-                try
+                await using var stream = File.OpenRead(potentialPlugin);
+                using var pe = new PEReader(stream);
+                if (pe.HasMetadata)
                 {
-                    // If PEHeaders doesn't throw an exception, it is a valid PEImage
-                    _ = pe.PEHeaders.CorHeader;
-                    var md = pe.GetMetadataReader();
-                    if (md.IsAssembly)
+                    try
                     {
-                        // .NET assembly
-                        LoadApp(potentialPlugin);
+                        // If PEHeaders doesn't throw an exception, it is a valid PEImage
+                        _ = pe.PEHeaders.CorHeader;
+                        var md = pe.GetMetadataReader();
+                        if (md.IsAssembly)
+                        {
+                            // .NET assembly
+                            LoadApp(host, potentialPlugin);
+                        }
                     }
-                }
-                catch (BadImageFormatException)
-                {
-                    // Swallow.
+                    catch (BadImageFormatException)
+                    {
+                        // Swallow.
+                    }
                 }
             }
         }
 
-        Logger.LogTrace("Setting up user listener loop");
+        Logger?.LogTrace("Setting up user listener loop");
         {
             var user_listener_task = Task.Run(async () => await UserListenerTask(nodeContext, cts.Token), cancellationToken);
             var user_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(user_listener_task_entry, user_listener_task);
-            Logger.LogTrace("User listener loop is a persistent background worker task {TaskId}", user_listener_task_entry.TaskId);
+            Logger?.LogTrace("User listener loop is a persistent background worker task {TaskId}", user_listener_task_entry.TaskId);
         }
 
-        Logger.LogTrace("Setting up peer listener loop");
+        Logger?.LogTrace("Setting up peer listener loop");
         {
             var peer_listener_task = Task.Run(async () => await PeerListenerTask(nodeContext, cts.Token), cancellationToken);
             var peer_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_listener_task_entry, peer_listener_task);
-            Logger.LogTrace("Peer listener loop is a persistent background worker task {TaskId}", peer_listener_task_entry.TaskId);
+            Logger?.LogTrace("Peer listener loop is a persistent background worker task {TaskId}", peer_listener_task_entry.TaskId);
         }
 
-        Logger.LogTrace("Setting up peer janitor loop");
+        Logger?.LogTrace("Setting up peer janitor loop");
         {
             var peer_janitor_task = Task.Run(() => PeerJanitorTask(cts.Token), cancellationToken);
             var peer_janitor_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_janitor_task_entry, peer_janitor_task);
-            Logger.LogTrace("Peer janitor loop is a persistent background worker task {TaskId}", peer_janitor_task_entry.TaskId);
+            Logger?.LogTrace("Peer janitor loop is a persistent background worker task {TaskId}", peer_janitor_task_entry.TaskId);
         }
 
-        Logger.LogTrace("Setting up peer dialer loop");
+        Logger?.LogTrace("Setting up peer dialer loop");
         {
             var peer_dialer_task = Task.Run(() => PeerDialerTask(nodeContext, cts.Token), cancellationToken);
             var dialer_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(dialer_task_entry, peer_dialer_task);
-            Logger.LogTrace("Dialer loop is a persistent background worker task {TaskId}", dialer_task_entry.TaskId);
+            Logger?.LogTrace("Dialer loop is a persistent background worker task {TaskId}", dialer_task_entry.TaskId);
         }
 
-        Logger.LogTrace("Setting up peer connected input handler loop");
+        Logger?.LogTrace("Setting up peer connected input handler loop");
         {
             var peer_handler_task = Task.Run(() => PeerHandleInputTask(nodeContext, cts.Token), cancellationToken);
             var peer_handler_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_handler_task_entry, peer_handler_task);
-            Logger.LogTrace("Peer input handler loop is a persistent background worker task {TaskId}", peer_handler_task_entry.TaskId);
+            Logger?.LogTrace("Peer input handler loop is a persistent background worker task {TaskId}", peer_handler_task_entry.TaskId);
         }
 
         while (!cts.IsCancellationRequested)
@@ -262,8 +275,8 @@ public class Node
                             }
                         default:
                             {
-                                Logger.LogError("Persistent background worker is not alive task {TaskId}", t.Key.TaskId);
-                                throw new Exception();
+                                Logger?.LogError("Persistent background worker is not alive task {TaskId}", t.Key.TaskId);
+                                throw new InvalidOperationException($"Persistent background worker is not alive task {t.Key.TaskId}");
                             }
                     }
                     continue;
@@ -286,7 +299,7 @@ public class Node
                         {
                             if (Tasks.TryRemove(t))
                             {
-                                Logger.LogTrace("Removed completed task {TaskId}", t.Key.TaskId);
+                                Logger?.LogTrace("Removed completed task {TaskId}", t.Key.TaskId);
                                 taskQueueSkip = taskIndex;
                                 goto task_walk_again;
                             }
@@ -302,7 +315,7 @@ public class Node
         }
     }
 
-    public void LoadApp(string appPath)
+    public void LoadApp(IHost host, string appPath)
     {
         ArgumentNullException.ThrowIfNull(appPath);
 
@@ -313,6 +326,7 @@ public class Node
         };
 
         // Load Apps
+        var config = (IConfiguration?)host.Services.GetService(typeof(IConfiguration));
         foreach (var path in new string[] { appPath })
         {
             var ass2 = new AppLoader();
@@ -329,13 +343,15 @@ public class Node
 #pragma warning restore IDE0019 // Use pattern matching
                 if (serverApp == null)
                 {
-                    Logger.LogError("Unable to load server app {TypeName}", serverAppType.FullName);
+                    Logger?.LogError("Unable to load server app {TypeName}", serverAppType.FullName);
                     continue;
                 }
 
-                serverApp.OnNodeInitialize(appContext);
+                var appConfig = config?.GetSection("Apps").GetSection(serverApp.Name);
+
+                serverApp.OnNodeInitialize(appContext, appConfig);
                 ServerApps.Add(serverApp);
-                Logger.LogInformation("Loaded server app {AppName} ({TypeName})", serverApp.Name, serverAppType.FullName);
+                Logger?.LogInformation("Loaded server app {AppName} ({TypeName})", serverApp.Name, serverAppType.FullName);
             }
 
             // Load Console Commands
@@ -348,13 +364,13 @@ public class Node
 #pragma warning restore IDE0019 // Use pattern matching
                 if (consoleCommand == null)
                 {
-                    Logger.LogError("Unable to load console command {TypeName}", consoleCommandType.FullName);
+                    Logger?.LogError("Unable to load console command {TypeName}", consoleCommandType.FullName);
                     continue;
                 }
 
                 ConsoleCommands.Add(consoleCommand);
                 consoleCommand.OnInitialize(appContext);
-                Logger.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
+                Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
             }
 
             // Load Client Apps
@@ -367,13 +383,13 @@ public class Node
 #pragma warning restore IDE0019 // Use pattern matching
                 if (clientApp == null)
                 {
-                    Logger.LogError("Unable to load client app {TypeName}", clientAppType.FullName);
+                    Logger?.LogError("Unable to load client app {TypeName}", clientAppType.FullName);
                     continue;
                 }
 
                 clientApp.OnInitialize(appContext);
                 ClientApps.Add(clientApp);
-                Logger.LogInformation("Loaded client app {AppName} ({TypeName})", clientApp.Name, clientAppType.FullName);
+                Logger?.LogInformation("Loaded client app {AppName} ({TypeName})", clientApp.Name, clientAppType.FullName);
             }
         }
     }
@@ -385,18 +401,18 @@ public class Node
         {
             using TcpListener user_listener = new(IPAddress.Loopback, UserPort);
             user_listener.Start();
-            Logger.LogInformation("Listening for local user commands at {LocalEndpoint}", user_listener.LocalEndpoint);
+            Logger?.LogInformation("Listening for local user commands at {LocalEndpoint}", user_listener.LocalEndpoint);
             while (!cancellationToken.IsCancellationRequested)
             {
                 var user = await user_listener.AcceptTcpClientAsync(cancellationToken);
-                using (Logger.BeginScope($"User Connection {user.Client?.RemoteEndPoint}"))
+                using (Logger?.BeginScope($"User Connection {user.Client?.RemoteEndPoint}"))
                 {
-                    Logger.LogDebug("New user connection from {RemoteEndPoint}", user.Client?.RemoteEndPoint);
+                    Logger?.LogDebug("New user connection from {RemoteEndPoint}", user.Client?.RemoteEndPoint);
 
                     var okay = UserMutex.WaitOne(5000); // Wait at most 5 seconds
                     if (!okay)
                     {
-                        Logger.LogError("Unable to obtain mutex to accept user connection.");
+                        Logger?.LogError("Unable to obtain mutex to accept user connection.");
                         continue;
                     }
 
@@ -404,7 +420,7 @@ public class Node
                     {
                         if (User != null)
                         {
-                            Logger.LogWarning($"A user connection already exists from {User.Client?.RemoteEndPoint}. Shutting that one down to use this new one from {user.Client?.RemoteEndPoint}");
+                            Logger?.LogWarning($"A user connection already exists from {User.Client?.RemoteEndPoint}. Shutting that one down to use this new one from {user.Client?.RemoteEndPoint}");
                             try
                             {
                                 await User.GetStream().WriteAsync(Encoding.UTF8.GetBytes($"\r\nUSER CONNECTING FROM {user.Client?.RemoteEndPoint}\r\nGOODBYE.\r\n"), cancellationToken);
@@ -412,7 +428,7 @@ public class Node
                             catch (Exception ex)
                             {
                                 // Swallow exception..
-                                Logger.LogTrace(ex, "Unable to send goodbye to replaced user connection");
+                                Logger?.LogTrace(ex, "Unable to send goodbye to replaced user connection");
                             }
                             User.Close();
                             User.Dispose();
@@ -441,7 +457,7 @@ public class Node
                         catch (EndOfStreamException)
                         {
                             // Swallow.
-                            Logger.LogInformation("User disconnected from console {RemoteEndPoint}. Closing.", User.Client?.RemoteEndPoint);
+                            Logger?.LogInformation("User disconnected from console {RemoteEndPoint}. Closing.", User.Client?.RemoteEndPoint);
                             User.Close();
                             User.Dispose();
                             User = null;
@@ -456,7 +472,7 @@ public class Node
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Exception in peer listener loop");
+            Logger?.LogError(ex, "Exception in peer listener loop");
             throw;
         }
     }
@@ -466,13 +482,13 @@ public class Node
         {
             using TcpListener peer_listener = new(ListenAddress, PeerPort);
             peer_listener.Start();
-            Logger.LogInformation("Listening for peers at {LocalEndpoint}", peer_listener.LocalEndpoint);
+            Logger?.LogInformation("Listening for peers at {LocalEndpoint}", peer_listener.LocalEndpoint);
             while (!cancellationToken.IsCancellationRequested)
             {
                 var peerTcpClient = await peer_listener.AcceptTcpClientAsync(cancellationToken);
-                using (Logger.BeginScope("New Peer {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint))
+                using (Logger?.BeginScope("New Peer {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint))
                 {
-                    Logger.LogDebug("New peer connection from {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint);
+                    Logger?.LogDebug("New peer connection from {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint);
                     var peer = Peer.CreatePeerFromAccept(peerTcpClient);
                     _ = Peers.TryAdd(peer.RemoteEndPoint!, peer);
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
@@ -483,7 +499,7 @@ public class Node
                         else if (peer.IdentityPublicKeyThumbprint == null
                             || peer.IdentityPublicKey == null)
                         {
-                            Logger.LogError("Identity public key malformed or not initialized after Syn handled.");
+                            Logger?.LogError("Identity public key malformed or not initialized after Syn handled.");
                             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                         }
                         else
@@ -495,7 +511,7 @@ public class Node
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Exception in peer listener loop");
+            Logger?.LogError(ex, "Exception in peer listener loop");
             throw;
         }
     }
@@ -524,7 +540,7 @@ public class Node
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Exception in peer janitor loop");
+            Logger?.LogError(ex, "Exception in peer janitor loop");
             throw;
         }
     }
@@ -533,7 +549,7 @@ public class Node
         while (Phonebook == null || Phonebook.Length == 0)
         {
             // Sleep for one hour.
-            Logger.LogDebug("No entries in the phone book; dialer sleeping for one hour.");
+            Logger?.LogDebug("No entries in the phone book; dialer sleeping for one hour.");
             Thread.Sleep(60 * 60000);
         }
 
@@ -567,7 +583,7 @@ public class Node
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Exception in dialer loop");
+            Logger?.LogError(ex, "Exception in dialer loop");
             throw;
         }
     }
@@ -598,7 +614,7 @@ public class Node
     {
         if (peer.IsWriteable)
         {
-            Logger.LogDebug("Sending Syn to peer {LocalEndPoint}->{RemoteEndPoint}", peer.LocalEndPoint, peer.RemoteEndPoint);
+            Logger?.LogDebug("Sending Syn to peer {LocalEndPoint}->{RemoteEndPoint}", peer.LocalEndPoint, peer.RemoteEndPoint);
             await peer.SendSyn(context, cancellationToken);
 
             Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
@@ -611,7 +627,7 @@ public class Node
                 else if (peer.IdentityPublicKeyThumbprint == null
                     || peer.IdentityPublicKey == null)
                 {
-                    Logger.LogError("Identity public key malformed or not initialized after Ack handled.");
+                    Logger?.LogError("Identity public key malformed or not initialized after Ack handled.");
                     Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                 }
                 else
@@ -619,7 +635,7 @@ public class Node
                     ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
 
                     // Okay, we made it!
-                    Logger.LogDebug("Sending test message to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
+                    Logger?.LogDebug("Sending test message to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
 
                     var payload = new ConsoleAlert
                     {
@@ -633,7 +649,7 @@ public class Node
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", peer.ShortName, peer.RemoteEndPoint);
+                        Logger?.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", peer.ShortName, peer.RemoteEndPoint);
                         peer.CloseInternal();
                         Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                     }
@@ -796,9 +812,9 @@ public class Node
         peer.CloseInternal();
 
         if (remoteEndPoint != null && Peers.TryRemove(new KeyValuePair<EndPoint, Peer>(remoteEndPoint, peer)))
-            Logger.LogDebug("Removed dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}", peer.ShortName, remoteEndPoint);
+            Logger?.LogDebug("Removed dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}", peer.ShortName, remoteEndPoint);
         else
-            Logger.LogError("Dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}!", peer.ShortName, remoteEndPoint);
+            Logger?.LogError("Dead peer {PeerShortName} RemoteEndPoint {RemoteEndPoint}!", peer.ShortName, remoteEndPoint);
     }
 
     internal IMessage? PrepareEnvelopePayload(
@@ -823,7 +839,7 @@ public class Node
         if (direct_peer != null)
         {
             // DM
-            return PrepareDirectedMessage(direct_peer.IdentityPublicKeyThumbprint.Value, innerPayload);
+            return PrepareDirectedMessage(direct_peer.IdentityPublicKeyThumbprint!.Value, innerPayload);
         }
         else
         {

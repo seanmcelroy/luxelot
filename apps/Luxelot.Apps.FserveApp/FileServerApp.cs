@@ -5,6 +5,7 @@ using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.FserveApp.Messages;
 using Luxelot.Messages;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.FserveApp;
@@ -14,6 +15,7 @@ public class FserveApp : IServerApp
     public const uint FS_PROTOCOL_VERSION = 1;
 
     private IAppContext? appContext;
+    private IConfigurationSection? appConfig;
 
     public string Name => "fserve";
 
@@ -99,10 +101,11 @@ public class FserveApp : IServerApp
         }
     }
 
-    public void OnNodeInitialize(IAppContext appContext)
+    public void OnNodeInitialize(IAppContext appContext, IConfigurationSection? appConfig)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         this.appContext = appContext;
+        this.appConfig = appConfig;
 
         _ = appContext.TryRegisterSingleton<FileClientApp>(() =>
         {

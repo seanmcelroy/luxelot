@@ -1,4 +1,5 @@
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.Configuration;
 
 namespace Luxelot.Apps.Common;
 
@@ -8,13 +9,13 @@ public interface IServerApp
 
     public bool InspectsForwarding { get; }
 
-    public void OnNodeInitialize(IAppContext appContext);
+    public void OnNodeInitialize(IAppContext appContext, IConfigurationSection? appConfig);
 
     public bool CanHandle(Any message);
 
     public Task<bool> HandleMessage(
         IRequestContext requestContext,
-        
+
         Any message,
         CancellationToken cancellationToken);
 }

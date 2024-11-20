@@ -1,6 +1,7 @@
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.PingApp.Messages;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.PingApp;
@@ -13,7 +14,7 @@ public class PingServer : IServerApp
 
     public bool InspectsForwarding => false;
 
-    public void OnNodeInitialize(IAppContext appContext)
+    public void OnNodeInitialize(IAppContext appContext, IConfigurationSection? _)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         this.appContext = appContext;

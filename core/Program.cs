@@ -67,7 +67,7 @@ internal class Program
             if (node.Value.KeyContainer == null)
             {
                 logger.LogInformation("No KeyContainer profiled for node {NodeShortName}. Creating new cryptographic key material.", node.Key);
-                nodes.Add(new Node(loggingFactory, node.Key)
+                nodes.Add(new Node(host, node.Key)
                 {
                     ListenAddress = IPAddress.Parse(node.Value.ListenAddress),
                     PeerPort = node.Value.PeerPort,
@@ -84,7 +84,7 @@ internal class Program
                     case 0:
                         {
                             logger.LogWarning("Missing key container file found for node '{NodeShortName}'. Creating anew.", node.Key);
-                            var newNode = new Node(loggingFactory, node.Key)
+                            var newNode = new Node(host, node.Key)
                             {
                                 ListenAddress = IPAddress.Parse(node.Value.ListenAddress),
                                 PeerPort = node.Value.PeerPort,
@@ -144,7 +144,7 @@ internal class Program
         List<Task> taskList = [];
         taskList.Add(host.RunAsync(cts.Token)); // Host
         foreach (var node in nodes)
-            taskList.Add(Task.Run(() => node.Main(cts.Token), cts.Token)); // Nodes
+            taskList.Add(Task.Run(() => node.Main(host, cts.Token), cts.Token)); // Nodes
 
         logger.LogInformation("Passing control to nodes");
         Task.WaitAll([.. taskList], cts.Token); ;

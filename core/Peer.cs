@@ -56,7 +56,7 @@ internal class Peer : IDisposable
         return peer;
     }
 
-    internal static async Task<Peer?> CreatePeerAndConnect(IPEndPoint endPoint, ILogger logger, CancellationToken cancellationToken)
+    internal static async Task<Peer?> CreatePeerAndConnect(IPEndPoint endPoint, ILogger? logger, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
 
@@ -67,7 +67,7 @@ internal class Peer : IDisposable
         }
         catch (SocketException sex)
         {
-            logger.LogError(sex, "Unable to connect to {RemoteEndPoint}", endPoint);
+            logger?.LogError(sex, "Unable to connect to {RemoteEndPoint}", endPoint);
             return null;
         }
 
