@@ -44,9 +44,10 @@ public partial class Node
 
     internal TcpClient? User;
     private readonly Mutex UserMutex = new();
-    private readonly AsymmetricCipherKeyPair IdentityKeys;
+    //private readonly AsymmetricCipherKeyPair IdentityKeys;
     public readonly ImmutableArray<byte> IdentityKeyPublicBytes;
     public readonly ImmutableArray<byte> IdentityKeyPublicThumbprint;
+    private readonly ImmutableArray<byte> IdentityKeyPrivateBytes;
     public string Name { get; init; }
     public string ShortName { get; init; }
 
@@ -60,10 +61,11 @@ public partial class Node
         ArgumentNullException.ThrowIfNull(loggerFactory);
         ArgumentNullException.ThrowIfNull(acp);
 
-        IdentityKeys = acp;
-        var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)IdentityKeys.Public).GetEncoded();
+        //IdentityKeys = acp;
+        var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)acp.Public).GetEncoded();
         IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
         IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
+        IdentityKeyPrivateBytes = [.. ((DilithiumPrivateKeyParameters)acp.Private).GetEncoded()];
         Name = DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint);
         ShortName = $"{Name[..8]}...";
         Logger = loggerFactory.CreateLogger($"Node {ShortName}");
@@ -78,10 +80,11 @@ public partial class Node
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
-        IdentityKeys = CryptoUtils.GenerateDilithiumKeyPair();
-        var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)IdentityKeys.Public).GetEncoded();
+        var acp = CryptoUtils.GenerateDilithiumKeyPair();
+        var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)acp.Public).GetEncoded();
         IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
         IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
+        IdentityKeyPrivateBytes = [.. ((DilithiumPrivateKeyParameters)acp.Private).GetEncoded()];
         Name = DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint);
         if (string.IsNullOrWhiteSpace(shortName))
         {
@@ -722,7 +725,8 @@ public partial class Node
                 }
 
             case "node":
-                await context.WriteLineToUserAsync($"ID Public Key: {DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
+                await context.WriteLineToUserAsync($"ID Public Key: {DisplayUtils.BytesToHex(IdentityKeyPublicBytes)}", cancellationToken);
+                await context.WriteLineToUserAsync($"ID Thumbnail: {DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
                 return;
 
             case "peers":
@@ -799,9 +803,11 @@ public partial class Node
             var forwardId = BitConverter.ToUInt64(forwardIdBytes);
             if (ForwardIds.TryAdd(forwardId, false))
             {
-                var nodeIdPrivateKey = (DilithiumPrivateKeyParameters)IdentityKeys.Private;
+                var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPublicBytes]);
+                var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPrivateBytes], pub);
+
                 var nodeSigner = new DilithiumSigner();
-                nodeSigner.Init(true, nodeIdPrivateKey);
+                nodeSigner.Init(true, pri);
                 var packed_payload = Any.Pack(innerPayload);
                 var signature = nodeSigner.GenerateSignature(packed_payload.ToByteArray());
 
@@ -831,9 +837,11 @@ public partial class Node
         if (Enumerable.SequenceEqual(destinationIdPubKeyThumbprint, IdentityKeyPublicThumbprint))
             throw new ArgumentException("Attempted to prepare direct messages to my own node", nameof(destinationIdPubKeyThumbprint));
 
-        var nodeIdPrivateKey = (DilithiumPrivateKeyParameters)IdentityKeys.Private;
+        var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPublicBytes]);
+        var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPrivateBytes], pub);
+
         var nodeSigner = new DilithiumSigner();
-        nodeSigner.Init(true, nodeIdPrivateKey);
+        nodeSigner.Init(true, pri);
         var packed_payload = Any.Pack(payload);
         var signature = nodeSigner.GenerateSignature(packed_payload.ToByteArray());
 
@@ -994,12 +1002,12 @@ public partial class Node
 
     public (byte[] enc, string salt62) ExportKeyContainer(string password)
     {
-        var nodeIdPrivateKey = (DilithiumPrivateKeyParameters)IdentityKeys.Private;
+        ArgumentNullException.ThrowIfNull(password);
 
         var kc = new KeyContainer
         {
             PublicKeyBase64 = Convert.ToBase64String([.. IdentityKeyPublicBytes]),
-            PrivateKeyBase64 = Convert.ToBase64String([.. nodeIdPrivateKey.GetEncoded()])
+            PrivateKeyBase64 = Convert.ToBase64String([.. IdentityKeyPrivateBytes])
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(kc);
