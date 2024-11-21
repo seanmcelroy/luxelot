@@ -27,9 +27,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
             "ChJzZXJ2ZXJfZnJhbWUucHJvdG8ifAoLU2VydmVyRnJhbWUSDQoFbm9uY2UY",
             "ASABKAwSEgoKY2lwaGVydGV4dBgCIAEoDBILCgN0YWcYAyABKAwSFwoPYXNz",
             "b2NpYXRlZF9kYXRhGAQgASgMEiQKCmZyYW1lX3R5cGUYBSABKA4yEC5TZXJ2",
-            "ZXJGcmFtZVR5cGUqNAoPU2VydmVyRnJhbWVUeXBlEhUKEUF1dGhVc2VyQ2hh",
-            "bGxlbmdlEAASCgoGU3RhdHVzEAFCIqoCH0x1eGVsb3QuQXBwcy5Gc2VydmVB",
-            "cHAuTWVzc2FnZXNiBnByb3RvMw=="));
+            "ZXJGcmFtZVR5cGUqRgoPU2VydmVyRnJhbWVUeXBlEhUKEUF1dGhVc2VyQ2hh",
+            "bGxlbmdlEAASCgoGU3RhdHVzEAESEAoMTGlzdFJlc3BvbnNlEAJCIqoCH0x1",
+            "eGVsb3QuQXBwcy5Gc2VydmVBcHAuTWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.FserveApp.Messages.ServerFrameType), }, null, new pbr::GeneratedClrTypeInfo[] {
@@ -43,6 +43,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
   public enum ServerFrameType {
     [pbr::OriginalName("AuthUserChallenge")] AuthUserChallenge = 0,
     [pbr::OriginalName("Status")] Status = 1,
+    [pbr::OriginalName("ListResponse")] ListResponse = 2,
   }
 
   #endregion

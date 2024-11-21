@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Luxelot.Apps.FserveApp.Messages";
+
+message ListResponse
+ {
+    int32 status_code = 1;
+    string status_message = 2;
+    string directory = 3;
+    string pattern = 4;
+    repeated Result results = 5;
+}
+
+message Result {
+    string name = 1;
+    uint32 size = 2;
+    optional google.protobuf.Timestamp modified = 3;
+}

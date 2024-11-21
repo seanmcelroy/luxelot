@@ -688,7 +688,7 @@ public class Node
             case "?":
             case "help":
                 await context.WriteLineToUserAsync("\r\nCommand List", cancellationToken);
-                var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers", "shutdown" };
+                var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers", "shutdown", "version" };
                 await context.WriteLineToUserAsync(built_in_cmds
                     .Union(ConsoleCommands.Select(cc => cc.Command.ToLowerInvariant()).ToArray())
                     .Order()
@@ -698,6 +698,11 @@ public class Node
                     .Order()
                     .Aggregate((c, n) => $"{c}\r\n{n}"), cancellationToken);
                 await context.WriteLineToUserAsync("End of Command List", cancellationToken);
+                break;
+
+            case "version":
+                var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                await context.WriteLineToUserAsync($"{Name} v{version}", cancellationToken);
                 break;
 
             case "cache":

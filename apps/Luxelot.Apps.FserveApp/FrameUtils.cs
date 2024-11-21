@@ -3,6 +3,7 @@ using Google.Protobuf;
 using Luxelot.App.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.FserveApp.Messages;
+using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.FserveApp;
 
@@ -18,8 +19,13 @@ public static class FrameUtils
             frameType = ServerFrameType.AuthUserChallenge;
         else if (message is Status)
             frameType = ServerFrameType.Status;
+        else if (message is ListResponse)
+            frameType = ServerFrameType.ListResponse;
         else
+        {
+            appContext?.Logger?.LogError("Unknown frame type: {TypeName}", message.GetType().FullName);
             throw new NotImplementedException($"Unknown frame type: {message.GetType().FullName}");
+        }
 
         return new ServerFrame
         {
@@ -95,6 +101,7 @@ public static class FrameUtils
         {
             ServerFrameType.AuthUserChallenge => AuthUserChallenge.Parser.ParseFrom(decrypted),
             ServerFrameType.Status => Status.Parser.ParseFrom(decrypted),
+            ServerFrameType.ListResponse => ListResponse.Parser.ParseFrom(decrypted),
             _ => throw new NotImplementedException($"Unknown frame type: {frame.FrameType}"),
         };
     }

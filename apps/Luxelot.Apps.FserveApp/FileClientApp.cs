@@ -76,12 +76,13 @@ public class FileClientApp : IClientApp
         }, cancellationToken);
     }
 
-    public async Task<bool> SendListRequest(CancellationToken cancellationToken)
+    public async Task<bool> SendListRequest(string directory, CancellationToken cancellationToken)
     {
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        if (ServerThumbprint == null || SessionSharedKey == null) {
+        if (ServerThumbprint == null || SessionSharedKey == null)
+        {
             appContext.Logger?.LogInformation("Listing failed, no connection to a server");
             await appContext.SendConsoleMessage($"Not connected to an fserve.", cancellationToken);
             return false;
@@ -91,8 +92,8 @@ public class FileClientApp : IClientApp
             appContext,
             new ListRequest
             {
-                Directory = string.Empty,
-                Pattern = string.Empty
+                Directory = directory,
+                Pattern = string.Empty // TODO
             },
             SessionSharedKey.Value);
 
@@ -173,6 +174,38 @@ public class FileClientApp : IClientApp
         return true;
     }
 
+    public async Task<bool> HandleListResponse(IRequestContext requestContext, ListResponse listResponse, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestContext);
+        ArgumentNullException.ThrowIfNull(listResponse);
+
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        using var scope = appContext.Logger?.BeginScope(nameof(HandleListResponse));
+
+        if (ServerThumbprint == null)
+        {
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but not currently connected. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            return true;
+        }
+
+        if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
+        {
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), DisplayUtils.BytesToHex(ServerThumbprint));
+            return true;
+        }
+        appContext.Logger?.LogInformation("Received from {SourceThumbprint}: {StatusCode} {StatusMessage}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), listResponse.StatusCode, listResponse.StatusMessage);
+
+        await appContext.SendConsoleMessage($"Listing for '{listResponse.Directory}':    {listResponse.StatusCode}", cancellationToken);
+        foreach (var result in listResponse.Results)
+        {
+            await appContext.SendConsoleMessage($"{result.Name} {result.Size}", cancellationToken);
+        }
+        await appContext.SendConsoleMessage("End of List", cancellationToken);
+        return true;
+    }
+
     public async Task<bool> HandleUserInput(string input, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
@@ -186,11 +219,16 @@ public class FileClientApp : IClientApp
             case "?":
             case "help":
                 await appContext.SendConsoleMessage($"\r\n{InteractiveCommand}> Command List\r\n{InteractiveCommand} >", cancellationToken);
-                var built_in_cmds = new string[] { "exit", "login", "list"};
+                var built_in_cmds = new string[] { "version", "exit", "login", "list" };
                 var cmd_string = built_in_cmds.Order()
                     .Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}");
                 await appContext.SendConsoleMessage(cmd_string, cancellationToken);
                 await appContext.SendConsoleMessage($"{InteractiveCommand}> End of Command List", cancellationToken);
+                return true;
+
+            case "version":
+                var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                await appContext.SendConsoleMessage($"{Name} v{version}", cancellationToken);
                 return true;
 
             case "login":

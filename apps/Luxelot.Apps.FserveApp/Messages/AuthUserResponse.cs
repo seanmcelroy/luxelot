@@ -24,17 +24,17 @@ namespace Luxelot.Apps.FserveApp.Messages {
     static AuthUserResponseReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "ChhhdXRoX3VzZXJfcmVzcG9uc2UucHJvdG8iqAEKEEF1dGhVc2VyUmVzcG9u",
-            "c2USDgoGc3RhdHVzGAEgASgFEhYKDnN0YXR1c19tZXNzYWdlGAIgASgJEkQK",
-            "HmFkZGl0aW9uYWxfdXNlcl9jaGFsbGVuZ2VfdHlwZRgDIAEoDjIcLkFkZGl0",
-            "aW9uYWxVc2VyQ2hhbGxlbmdlVHlwZRImCh5hZGRpdGlvbmFsX3VzZXJfY2hh",
-            "bGxlbmdlX2RhdGEYBCABKAwqPgobQWRkaXRpb25hbFVzZXJDaGFsbGVuZ2VU",
-            "eXBlEggKBE5PTkUQABIMCghQQVNTV09SRBABEgcKA09UUBACQiKqAh9MdXhl",
-            "bG90LkFwcHMuRnNlcnZlQXBwLk1lc3NhZ2VzYgZwcm90bzM="));
+            "ChhhdXRoX3VzZXJfcmVzcG9uc2UucHJvdG8irQEKEEF1dGhVc2VyUmVzcG9u",
+            "c2USEwoLc3RhdHVzX2NvZGUYASABKAUSFgoOc3RhdHVzX21lc3NhZ2UYAiAB",
+            "KAkSRAoeYWRkaXRpb25hbF91c2VyX2NoYWxsZW5nZV90eXBlGAMgASgOMhwu",
+            "QWRkaXRpb25hbFVzZXJDaGFsbGVuZ2VUeXBlEiYKHmFkZGl0aW9uYWxfdXNl",
+            "cl9jaGFsbGVuZ2VfZGF0YRgEIAEoDCo+ChtBZGRpdGlvbmFsVXNlckNoYWxs",
+            "ZW5nZVR5cGUSCAoETk9ORRAAEgwKCFBBU1NXT1JEEAESBwoDT1RQEAJCIqoC",
+            "H0x1eGVsb3QuQXBwcy5Gc2VydmVBcHAuTWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.FserveApp.Messages.AdditionalUserChallengeType), }, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.AuthUserResponse), global::Luxelot.Apps.FserveApp.Messages.AuthUserResponse.Parser, new[]{ "Status", "StatusMessage", "AdditionalUserChallengeType", "AdditionalUserChallengeData" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.AuthUserResponse), global::Luxelot.Apps.FserveApp.Messages.AuthUserResponse.Parser, new[]{ "StatusCode", "StatusMessage", "AdditionalUserChallengeType", "AdditionalUserChallengeData" }, null, null, null, null)
           }));
     }
     #endregion
@@ -84,7 +84,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public AuthUserResponse(AuthUserResponse other) : this() {
-      status_ = other.status_;
+      statusCode_ = other.statusCode_;
       statusMessage_ = other.statusMessage_;
       additionalUserChallengeType_ = other.additionalUserChallengeType_;
       additionalUserChallengeData_ = other.additionalUserChallengeData_;
@@ -97,15 +97,15 @@ namespace Luxelot.Apps.FserveApp.Messages {
       return new AuthUserResponse(this);
     }
 
-    /// <summary>Field number for the "status" field.</summary>
-    public const int StatusFieldNumber = 1;
-    private int status_;
+    /// <summary>Field number for the "status_code" field.</summary>
+    public const int StatusCodeFieldNumber = 1;
+    private int statusCode_;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public int Status {
-      get { return status_; }
+    public int StatusCode {
+      get { return statusCode_; }
       set {
-        status_ = value;
+        statusCode_ = value;
       }
     }
 
@@ -160,7 +160,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       if (ReferenceEquals(other, this)) {
         return true;
       }
-      if (Status != other.Status) return false;
+      if (StatusCode != other.StatusCode) return false;
       if (StatusMessage != other.StatusMessage) return false;
       if (AdditionalUserChallengeType != other.AdditionalUserChallengeType) return false;
       if (AdditionalUserChallengeData != other.AdditionalUserChallengeData) return false;
@@ -171,7 +171,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override int GetHashCode() {
       int hash = 1;
-      if (Status != 0) hash ^= Status.GetHashCode();
+      if (StatusCode != 0) hash ^= StatusCode.GetHashCode();
       if (StatusMessage.Length != 0) hash ^= StatusMessage.GetHashCode();
       if (AdditionalUserChallengeType != global::Luxelot.Apps.FserveApp.Messages.AdditionalUserChallengeType.None) hash ^= AdditionalUserChallengeType.GetHashCode();
       if (AdditionalUserChallengeData.Length != 0) hash ^= AdditionalUserChallengeData.GetHashCode();
@@ -193,9 +193,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
     #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       output.WriteRawMessage(this);
     #else
-      if (Status != 0) {
+      if (StatusCode != 0) {
         output.WriteRawTag(8);
-        output.WriteInt32(Status);
+        output.WriteInt32(StatusCode);
       }
       if (StatusMessage.Length != 0) {
         output.WriteRawTag(18);
@@ -219,9 +219,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
-      if (Status != 0) {
+      if (StatusCode != 0) {
         output.WriteRawTag(8);
-        output.WriteInt32(Status);
+        output.WriteInt32(StatusCode);
       }
       if (StatusMessage.Length != 0) {
         output.WriteRawTag(18);
@@ -245,8 +245,8 @@ namespace Luxelot.Apps.FserveApp.Messages {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public int CalculateSize() {
       int size = 0;
-      if (Status != 0) {
-        size += 1 + pb::CodedOutputStream.ComputeInt32Size(Status);
+      if (StatusCode != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(StatusCode);
       }
       if (StatusMessage.Length != 0) {
         size += 1 + pb::CodedOutputStream.ComputeStringSize(StatusMessage);
@@ -269,8 +269,8 @@ namespace Luxelot.Apps.FserveApp.Messages {
       if (other == null) {
         return;
       }
-      if (other.Status != 0) {
-        Status = other.Status;
+      if (other.StatusCode != 0) {
+        StatusCode = other.StatusCode;
       }
       if (other.StatusMessage.Length != 0) {
         StatusMessage = other.StatusMessage;
@@ -297,7 +297,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
           case 8: {
-            Status = input.ReadInt32();
+            StatusCode = input.ReadInt32();
             break;
           }
           case 18: {
@@ -328,7 +328,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
           case 8: {
-            Status = input.ReadInt32();
+            StatusCode = input.ReadInt32();
             break;
           }
           case 18: {

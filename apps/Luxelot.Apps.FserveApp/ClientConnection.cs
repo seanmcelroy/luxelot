@@ -11,6 +11,8 @@ public class ClientConnection
 
     public string? PrincipalAsName { get => Principal == null ? null : Encoding.UTF8.GetString([.. Principal]); }
 
+    public string CurrentWorkingDirectory { get; set; } = "/";
+
     public ClientConnection(ImmutableArray<byte> sessionSharedKey)
     {
         ArgumentNullException.ThrowIfNull(sessionSharedKey);

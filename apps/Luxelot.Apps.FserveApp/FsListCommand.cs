@@ -20,11 +20,13 @@ public class ListCommand : IConsoleCommand
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
-        if (words.Length != 1)
+        if (words.Length != 1 && words.Length != 2)
         {
-            await appContext.SendConsoleMessage($"FSLIST command accepts no arguments.", cancellationToken);
+            await appContext.SendConsoleMessage($"FSLIST command requires zero or one argument, the optional directory to list.", cancellationToken);
             return false;
         }
+
+        var directory = words.Length == 1 ? "/" : words[1];
 
         if (!appContext.TryGetSingleton(out FileClientApp? fileClientApp)
             || fileClientApp == null)
@@ -34,6 +36,6 @@ public class ListCommand : IConsoleCommand
             return false;
         }
         
-        return await fileClientApp.SendListRequest(cancellationToken);
+        return await fileClientApp.SendListRequest(directory, cancellationToken);
     }
 }

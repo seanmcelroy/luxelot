@@ -10,7 +10,9 @@ internal class Program
 {
     private static async Task Main(string[] args)
     {
-        Console.WriteLine("Luxelot v0.0.1");
+        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        Console.WriteLine($"Luxelot v{version}");
+
         CancellationTokenSource cts = new();
 
         // Setup hosting
