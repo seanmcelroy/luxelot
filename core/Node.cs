@@ -705,6 +705,18 @@ public class Node
                 await context.WriteLineToUserAsync($"{Name} v{version}", cancellationToken);
                 break;
 
+            case "apps":
+                {
+                    await context.WriteLineToUserAsync("\r\nApps List", cancellationToken);
+                    foreach (var app in ServerApps.Order())
+                    {
+                        await context.WriteLineToUserAsync($"{app.Name}", cancellationToken);
+                    }
+                    await context.WriteLineToUserAsync("End of Apps List", cancellationToken);
+
+                    break;
+                }
+
             case "cache":
                 {
                     await context.WriteLineToUserAsync("\r\nThumbprint Cache List", cancellationToken);
