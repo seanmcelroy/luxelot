@@ -8,6 +8,16 @@ Luxelot is a peer-to-peer (p2p) network for establishing encrypted channels betw
 
 This is a very, very alpha project.  Simple things like direct P2P connections using explicit address configuration work, as do some very simple concepts like "ping"/"pong".  There's not much else to this project yet, but more is planned.  A simple file transfer service implemented as an app (see Apps under Concepts below) is the current active focus to exemplify the potential of the project.
 
+## Quickstart
+
+1. Download and build the solution using `dotnet build` in the root directory, which contains the luxelot.sln file.
+
+2. Run the command `dotnet run --project ./core/luxelot.csproj &` (on Linux to run in the background of the shell) which will run the core project, which is the console host.  Wait a minute or so for the nodes defined in the `appsettings.json` file to be spun up.
+
+3. Connect to the console host using telnet or netcat, such as `nc 127.0.0.1 8000`.  You should be greeted with "HELLO."
+
+4. Type `peers` or `help`.  Play!
+
 ## Concepts
 
 ### Apps
@@ -29,6 +39,8 @@ Bouncy Castle is used for all post-quantum cryptography usage.
 ### Message Protocol
 
 Messages are encoded using Protocol Buffers (proto3), and are defined in .proto files in the projects that own them.
+
+For more information about the message protocol, see PROTOCOL.md
 
 ### Anonymity
 
