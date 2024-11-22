@@ -60,7 +60,15 @@ internal class Program
         // Setup nodes
         logger.LogInformation("Creating nodes");
 
+        var noKeyContainerEncryption = config.GetValue("NoKeyContainerEncryption", false);
         var noPassword = config.GetValue("NoPassword", false);
+
+        if (noKeyContainerEncryption) {
+            logger.LogCritical("Setting NoKeyContainerEncryption=true used.  This means your identity keys are not encrypted.  This should only be used in a dev mode when you need to quickly restart the process repeatedly.");
+        }
+        else if (noPassword) {
+            logger.LogCritical("Setting NoPassword=true used.  This means your identity keys are encrypted with a static password.  This should only be used in a headless when you need to quickly start the process without user input.");
+        }
 
         List<Node> nodes = [];
         foreach (var node in nodesConfig.Instances)
@@ -79,7 +87,7 @@ internal class Program
             }
             else
             {
-                var keyContainerFiles = Directory.GetFiles(luxelotDataFolder, $"{node.Value.KeyContainer}.*");
+                var keyContainerFiles = Directory.GetFiles(luxelotDataFolder, $"{node.Value.KeyContainer}.{(noKeyContainerEncryption ? "unencrypted" : "*")}");
                 string keyContainerFile;
                 switch (keyContainerFiles.Length)
                 {
@@ -95,7 +103,7 @@ internal class Program
                             };
 
                             if (!noPassword) Console.WriteLine($"{Environment.NewLine}Enter a password to encrypt the key container for node '{node.Key}'.  You must enter this each time you start the app to run the node with the same ID.");
-                            var password = noPassword ? "insecure" : ReadPassword();
+                            var password = noKeyContainerEncryption ? null : (noPassword ? "insecure" : ReadPassword());
                             var (enc, salt62) = newNode.ExportKeyContainer(password);
                             await File.WriteAllBytesAsync(Path.Combine(luxelotDataFolder, $"{node.Value.KeyContainer}.{salt62}"), enc, cts.Token);
 
@@ -112,7 +120,7 @@ internal class Program
                             do
                             {
                                 if (!noPassword) Console.WriteLine($"{Environment.NewLine}Enter the password to decrypt the key container for node '{node.Key}'.");
-                                var password = noPassword ? "insecure" : ReadPassword();
+                                var password = noKeyContainerEncryption ? null : (noPassword ? "insecure" : ReadPassword());
                                 newNode = Node.CreateFromEncryptedKeyContainer(
                                     logger,
                                     loggingFactory,

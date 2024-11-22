@@ -49,6 +49,8 @@ public static class FrameUtils
             frameType = ClientFrameType.AuthUserResponse;
         else if (message is ListRequest)
             frameType = ClientFrameType.ListRequest;
+        else if (message is ChangeDirectoryRequest)
+            frameType = ClientFrameType.ChangeDirectoryRequest;
         else
             throw new NotImplementedException($"Unknown frame type: {message.GetType().FullName}");
 
@@ -80,6 +82,7 @@ public static class FrameUtils
             ClientFrameType.AuthUserBegin => AuthUserBegin.Parser.ParseFrom(decrypted),
             ClientFrameType.AuthUserResponse => AuthUserResponse.Parser.ParseFrom(decrypted),
             ClientFrameType.ListRequest => ListRequest.Parser.ParseFrom(decrypted),
+            ClientFrameType.ChangeDirectoryRequest => ChangeDirectoryRequest.Parser.ParseFrom(decrypted),
             _ => throw new NotImplementedException($"Unknown frame type: {frame.FrameType}"),
         };
     }

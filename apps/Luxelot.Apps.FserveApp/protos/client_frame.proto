@@ -15,4 +15,5 @@ enum ClientFrameType {
     AuthUserBegin = 0;
     AuthUserResponse = 1;
     ListRequest = 2;
+    ChangeDirectoryRequest = 3;
 }

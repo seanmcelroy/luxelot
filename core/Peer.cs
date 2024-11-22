@@ -150,6 +150,9 @@ internal class Peer : IDisposable
             return false;
         }
 
+        // We could decrypt and parse, so consider us established.
+        State = PeerState.ESTABLISHED;
+
         if (envelopePayload.ErrorMessage != null)
         {
             var em = envelopePayload.ErrorMessage;
@@ -257,6 +260,7 @@ internal class Peer : IDisposable
         else if (envelopePayload.DirectedMessage != null)
         {
             var dm = envelopePayload.DirectedMessage;
+            // We could decrypt, so we are established.
             return await HandleDirectedMessage(nodeContext, dm, thumbprintSignatureCache, cancellationToken);
         }
         else

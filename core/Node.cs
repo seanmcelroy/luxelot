@@ -115,7 +115,7 @@ public class Node
         ILoggerFactory nodeLoggerFactory,
         byte[] encryptedKeyContainer,
         string salt62,
-        string password,
+        string? password,
         IPAddress listenAddress,
         ushort peerPort,
         ushort userPort,
@@ -125,27 +125,36 @@ public class Node
         ArgumentNullException.ThrowIfNull(nodeLoggerFactory);
         ArgumentNullException.ThrowIfNull(encryptedKeyContainer);
         ArgumentNullException.ThrowIfNull(salt62);
-        ArgumentNullException.ThrowIfNull(password);
 
-        var passphrase_bytes = Encoding.UTF8.GetBytes(password);
-        var salt = salt62.ConvertFromBase62();
-        if (salt.Length != 16)
-            throw new ArgumentException("Salt must be 16 bytes", nameof(salt62));
+        string json;
+        if (password == null)
+        {
+            json = Encoding.UTF8.GetString(encryptedKeyContainer);
+        }
+        else
+        {
+            var passphrase_bytes = Encoding.UTF8.GetBytes(password);
+            var salt = salt62.ConvertFromBase62();
+            if (salt.Length != 16)
+                throw new ArgumentException("Salt must be 16 bytes", nameof(salt62));
 
-        var aes = Aes.Create();
-        var pbk = SCrypt.Generate(passphrase_bytes, salt, 1048576, 8, 1, aes.KeySize / 8);
-        aes.Key = pbk;
-        byte[] jsonBytes;
-        try
-        {
-            jsonBytes = aes.DecryptCbc(encryptedKeyContainer, salt, PaddingMode.PKCS7);
+            var aes = Aes.Create();
+            var pbk = SCrypt.Generate(passphrase_bytes, salt, 1048576, 8, 1, aes.KeySize / 8);
+            aes.Key = pbk;
+            byte[] jsonBytes;
+            try
+            {
+                jsonBytes = aes.DecryptCbc(encryptedKeyContainer, salt, PaddingMode.PKCS7);
+            }
+            catch (CryptographicException ce)
+            {
+                logger.LogError(ce, "Node creation failed; unable to decrypt key container.");
+                return null;
+            }
+
+            json = Encoding.UTF8.GetString(jsonBytes);
         }
-        catch (CryptographicException ce)
-        {
-            logger.LogError(ce, "Node creation failed; unable to decrypt key container.");
-            return null;
-        }
-        var json = Encoding.UTF8.GetString(jsonBytes);
+
         var kc = System.Text.Json.JsonSerializer.Deserialize<KeyContainer>(json) ?? throw new InvalidOperationException("Unable to deserialize key container");
 
         var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, Convert.FromBase64String(kc.PublicKeyBase64));
@@ -702,7 +711,7 @@ public class Node
 
             case "version":
                 var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                await context.WriteLineToUserAsync($"{Name} v{version}", cancellationToken);
+                await context.WriteLineToUserAsync($"Luxelot v{version} running on node {ShortName}", cancellationToken);
                 break;
 
             case "apps":
@@ -1063,10 +1072,8 @@ public class Node
         }
     }
 
-    public (byte[] enc, string salt62) ExportKeyContainer(string password)
+    public (byte[] enc, string salt62) ExportKeyContainer(string? password)
     {
-        ArgumentNullException.ThrowIfNull(password);
-
         var kc = new KeyContainer
         {
             PublicKeyBase64 = Convert.ToBase64String([.. IdentityKeyPublicBytes]),
@@ -1075,16 +1082,20 @@ public class Node
 
         var json = System.Text.Json.JsonSerializer.Serialize(kc);
         var jsonBytes = Encoding.UTF8.GetBytes(json);
+        if (password == null)
+            return (jsonBytes, "unencrypted");
 
         var passphrase_bytes = Encoding.UTF8.GetBytes(password);
         var salt = new byte[16];
-        RandomNumberGenerator.Fill(salt);
+        if (string.CompareOrdinal(password, "insecure") == 0)
+            Array.Copy(passphrase_bytes, salt, passphrase_bytes.Length);
+        else
+            RandomNumberGenerator.Fill(salt);
 
         var aes = Aes.Create();
         var pbk = SCrypt.Generate(passphrase_bytes, salt, 1048576, 8, 1, aes.KeySize / 8);
         aes.Key = pbk;
         var encrypted = aes.EncryptCbc(jsonBytes, salt, PaddingMode.PKCS7);
-
         return (encrypted, salt.ConvertToBase62());
     }
 }

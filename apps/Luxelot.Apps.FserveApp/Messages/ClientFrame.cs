@@ -27,9 +27,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
             "ChJjbGllbnRfZnJhbWUucHJvdG8ifAoLQ2xpZW50RnJhbWUSDQoFbm9uY2UY",
             "ASABKAwSEgoKY2lwaGVydGV4dBgCIAEoDBILCgN0YWcYAyABKAwSFwoPYXNz",
             "b2NpYXRlZF9kYXRhGAQgASgMEiQKCmZyYW1lX3R5cGUYBSABKA4yEC5DbGll",
-            "bnRGcmFtZVR5cGUqSwoPQ2xpZW50RnJhbWVUeXBlEhEKDUF1dGhVc2VyQmVn",
-            "aW4QABIUChBBdXRoVXNlclJlc3BvbnNlEAESDwoLTGlzdFJlcXVlc3QQAkIi",
-            "qgIfTHV4ZWxvdC5BcHBzLkZzZXJ2ZUFwcC5NZXNzYWdlc2IGcHJvdG8z"));
+            "bnRGcmFtZVR5cGUqZwoPQ2xpZW50RnJhbWVUeXBlEhEKDUF1dGhVc2VyQmVn",
+            "aW4QABIUChBBdXRoVXNlclJlc3BvbnNlEAESDwoLTGlzdFJlcXVlc3QQAhIa",
+            "ChZDaGFuZ2VEaXJlY3RvcnlSZXF1ZXN0EANCIqoCH0x1eGVsb3QuQXBwcy5G",
+            "c2VydmVBcHAuTWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.FserveApp.Messages.ClientFrameType), }, null, new pbr::GeneratedClrTypeInfo[] {
@@ -44,6 +45,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     [pbr::OriginalName("AuthUserBegin")] AuthUserBegin = 0,
     [pbr::OriginalName("AuthUserResponse")] AuthUserResponse = 1,
     [pbr::OriginalName("ListRequest")] ListRequest = 2,
+    [pbr::OriginalName("ChangeDirectoryRequest")] ChangeDirectoryRequest = 3,
   }
 
   #endregion

@@ -13,4 +13,5 @@ message Status
 enum Operation {
     NONE = 0;
     AUTHENTICATION = 1;
+    CD = 2;
 }

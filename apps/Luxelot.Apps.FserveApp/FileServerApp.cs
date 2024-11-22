@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Text;
 using Google.Protobuf;
-using Google.Protobuf.Collections;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.FserveApp.Messages;
@@ -14,6 +14,7 @@ namespace Luxelot.Apps.FserveApp;
 public class FserveApp : IServerApp
 {
     public const uint FS_PROTOCOL_VERSION = 1;
+    private const string ROOT = "::<<<ROOT>_>_>";
 
     private IAppContext? appContext;
     private IConfigurationSection? appConfig;
@@ -73,6 +74,8 @@ public class FserveApp : IServerApp
                         return await HandleAuthUserBegin(requestContext, aub, cancellationToken);
                     else if (innerMessage is ListRequest lr)
                         return await HandleListRequest(requestContext, lr, cancellationToken);
+                    else if (innerMessage is ChangeDirectoryRequest cdr)
+                        return await HandleChangeDirectoryRequest(requestContext, cdr, cancellationToken);
                     else
                     {
                         appContext?.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Unsupported client frame type: {FrameType}", requestContext.PeerShortName, requestContext.RemoteEndPoint, innerMessage.GetType().FullName);
@@ -232,10 +235,23 @@ public class FserveApp : IServerApp
         Dictionary<string, TreeNode> logicalMounts = [];
         foreach (var mount in mountsConfig.Mounts)
         {
-            var mountPoint = mount.Key;
-            if (mountPoint.Length < 2 || mountPoint[0] != '/')
+            var virtualMountPoint = mount.Key;
+
+            if (string.IsNullOrWhiteSpace(virtualMountPoint))
             {
-                appContext?.Logger?.LogWarning("Mount point '/' is not allowed.  Mount points must be more than one character and being with a forward slash. Skipping.");
+                appContext?.Logger?.LogWarning("Empty virtual mount point is not allowed.  Mount points must be more than one character and being with a forward slash. Skipping.");
+                continue;
+            }
+
+            if (virtualMountPoint.Length == 1 && virtualMountPoint[0] == '/')
+            {
+                appContext?.Logger?.LogWarning("Virtual mount point '/' is not allowed.  Mount points must be more than one character and being with a forward slash. Skipping.");
+                continue;
+            }
+
+            if (virtualMountPoint[0] != '/')
+            {
+                appContext?.Logger?.LogWarning("Virtual mount point '{VirtualPath}' is not allowed.  Mount points must be more than one character and being with a forward slash. Skipping.", virtualMountPoint);
                 continue;
             }
 
@@ -243,12 +259,18 @@ public class FserveApp : IServerApp
             if (actualPath.EndsWith(Path.DirectorySeparatorChar))
                 actualPath = actualPath[..^1];
 
-            logicalMounts.Add(mountPoint, BuildTreeNode(mountPoint, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots));
+            //            else
+            //                nodes.Add(realCurrent, new TreeNode { Name = mountPoint[1..], Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
+
+
+            logicalMounts.Add(actualPath, BuildTreeNode(virtualMountPoint, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots));
         }
 
         var logicalMountRoot = new TreeNode
         {
-            Name = "/",
+            RelativeName = "/",
+            RelativePath = "/",
+            AbsolutePath = string.Empty,
             Children = logicalMounts.ToImmutableDictionary(),
             Count = (uint)logicalMounts.Count,
             DescendentCount = 0, // Set following this statement
@@ -281,19 +303,38 @@ public class FserveApp : IServerApp
         Dictionary<string, TreeNode> nodes = [];
         uint vcount = 1;
 
+        var relativeDirName = Path.GetRelativePath(realRoot, realCurrent);
+        var relativeMountPath = Path.Combine(mountPoint, relativeDirName);
+
         try
         {
-            // This .
-            nodes.Add(realCurrent, new TreeNode { Name = ".", Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
+
+            // This . add if not root, or base name if root
+            if (relativeDirName == ".")
+            {
+                nodes.Add(realCurrent, new TreeNode { RelativeName = ".", RelativePath = relativeMountPath, AbsolutePath = realCurrent, Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
+            }
+
             // Parent ..
             if (string.Compare(realRoot, realCurrent, StringComparison.OrdinalIgnoreCase) != 0)
             {
                 var parent = Directory.GetParent(realCurrent);
                 if (parent != null)
                 {
-                    nodes.Add(parent.FullName, new TreeNode { Name = "..", Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
+                    var relParentPath = Path.GetRelativePath(realRoot, parent.FullName);
+
+                    var relMountParentPath = (string.CompareOrdinal(relParentPath, ".") == 0)
+                        ? mountPoint
+                        : Path.Combine(mountPoint, relParentPath);
+
+                    nodes.Add(parent.FullName, new TreeNode { RelativeName = "..", RelativePath = relMountParentPath, AbsolutePath = parent.FullName, Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
                     vcount++;
                 }
+            }
+            else
+            {
+                nodes.Add(ROOT, new TreeNode { RelativeName = "..", RelativePath = ROOT, AbsolutePath = realRoot, Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
+                vcount++;
             }
 
             // Subdirectories
@@ -313,28 +354,33 @@ public class FserveApp : IServerApp
             }
 
             // Files
-            try
             {
-                foreach (var file in Directory.GetFiles(realCurrent))
+                try
                 {
-                    var relName = Path.GetFileName(Path.GetRelativePath(realRoot, file));
-                    var fi = new FileInfo(file);
-                    var size = (uint)fi.Length;
-                    nodes.Add(file, new TreeNode
+                    foreach (var file in Directory.GetFiles(realCurrent))
                     {
-                        Name = relName,
-                        Children = null,
-                        Count = 0,
-                        DescendentCount = 0,
-                        Size = size,
-                        DescendentSize = size,
-                        LastModified = fi.LastWriteTimeUtc,
-                    });
+                        var relFilePath = Path.GetRelativePath(realRoot, file);
+                        var relFileName = Path.GetFileName(relFilePath);
+                        var fi = new FileInfo(file);
+                        var size = (uint)fi.Length;
+                        nodes.Add(file, new TreeNode
+                        {
+                            RelativeName = relFileName,
+                            RelativePath = relFilePath,
+                            AbsolutePath = fi.FullName,
+                            Children = null,
+                            Count = 0,
+                            DescendentCount = 0,
+                            Size = size,
+                            DescendentSize = size,
+                            LastModified = fi.LastWriteTimeUtc,
+                        });
+                    }
                 }
-            }
-            catch (DirectoryNotFoundException)
-            {
-                // Swallow.  Some types of *nix files behave this way.
+                catch (DirectoryNotFoundException)
+                {
+                    // Swallow.  Some types of *nix files behave this way.
+                }
             }
         }
         catch (UnauthorizedAccessException uae)
@@ -342,24 +388,33 @@ public class FserveApp : IServerApp
             // Swallow.
         }
 
-        {
-            var relName = Path.GetRelativePath(realRoot, realCurrent);
-            var ret = new TreeNode
-            {
-                Name = relName,
-                Children = nodes.ToImmutableDictionary(),
-                Count = (uint)nodes.Count - vcount, // Don't count . and ..
-                DescendentCount = 0, // Set following this statement
-                Size = uint.MaxValue, // Directories have no inherent size
-                DescendentSize = 0, // Set following this statement
-                LastModified = null,
-            };
-            virtualRoot.Add(Path.Combine(mountPoint, relName), ret);
 
-            ret.DescendentCount = RecursiveCount(ret);
-            ret.DescendentSize = RecursiveSize(ret);
-            return ret;
-        }
+        var relName = (string.CompareOrdinal(relativeDirName, ".") == 0)
+            ? mountPoint[1..]
+            : relativeDirName;
+
+        var relMountPath = (string.CompareOrdinal(relativeDirName, ".") == 0)
+            ? mountPoint
+            : relativeMountPath;
+
+        var ret = new TreeNode
+        {
+            RelativeName = relName,
+            RelativePath = relMountPath,
+            AbsolutePath = realCurrent,
+            Children = nodes.ToImmutableDictionary(),
+            Count = (uint)nodes.Count - vcount, // Don't count . and ..
+            DescendentCount = 0, // Set following this statement
+            Size = uint.MaxValue, // Directories have no inherent size
+            DescendentSize = 0, // Set following this statement
+            LastModified = null,
+        };
+        virtualRoot.Add(relMountPath, ret);
+
+        ret.DescendentCount = RecursiveCount(ret);
+        ret.DescendentSize = RecursiveSize(ret);
+        return ret;
+
     }
 
     private async Task<bool> HandleListRequest(IRequestContext requestContext, ListRequest lr, CancellationToken cancellationToken)
@@ -384,7 +439,9 @@ public class FserveApp : IServerApp
         // Build tree if it hasn't already been built.
         logicalRootNode ??= BuildLogicalDirectoryTree();
 
-        if (!virtualRoots.TryGetValue(lr.Directory, out TreeNode? virt))
+        var targetDir = string.IsNullOrWhiteSpace(lr.Directory) ? cc.CurrentWorkingDirectory : lr.Directory;
+
+        if (!virtualRoots.TryGetValue(targetDir, out TreeNode? virt))
         {
             return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
                 appContext,
@@ -392,30 +449,117 @@ public class FserveApp : IServerApp
                 {
                     StatusCode = 404,
                     StatusMessage = "Directory not found",
-                    Directory = lr.Directory,
+                    Directory = targetDir,
                     Pattern = lr.Pattern
                 },
                 cc.SessionSharedKey), cancellationToken);
         }
 
-        cc.CurrentWorkingDirectory = lr.Directory;
-
         var resp = new ListResponse
         {
             StatusCode = 200,
             StatusMessage = "Results returned",
-            Directory = lr.Directory,
+            Directory = targetDir,
             Pattern = lr.Pattern,
         };
         if (virt.Children != null)
         {
-            resp.Results.AddRange(virt.Children.Select(c => new Result
+            resp.Results.AddRange(virt.Children.OrderBy(c => c.Value.RelativeName).Select(c => new Result
             {
-                Name = c.Key,
+                Name = c.Value.RelativeName,
                 Size = c.Value.Size,
                 Modified = c.Value.LastModified == null ? null : Timestamp.FromDateTimeOffset(c.Value.LastModified.Value)
             }));
         }
+
+        return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+            appContext,
+            resp,
+            cc.SessionSharedKey), cancellationToken);
+    }
+
+    private async Task<bool> HandleChangeDirectoryRequest(IRequestContext requestContext, ChangeDirectoryRequest cdr, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestContext);
+        ArgumentNullException.ThrowIfNull(cdr);
+
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
+        {
+            appContext.Logger?.LogDebug("ChangeDirectoryRequest received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            return true;
+        }
+
+        appContext.Logger?.LogDebug("ChangeDirectoryRequest from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+
+        // Build tree if it hasn't already been built.
+        logicalRootNode ??= BuildLogicalDirectoryTree();
+
+        if (cdr.Directory.StartsWith('/'))
+        {
+            // Absolute
+            if (!virtualRoots.TryGetValue(cdr.Directory, out TreeNode? virt))
+            {
+                return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                    appContext,
+                    new Status
+                    {
+                        Operation = Operation.Cd,
+                        StatusCode = 404,
+                        StatusMessage = "Directory not found",
+                        ResultPayload = ByteString.CopyFrom(Encoding.UTF8.GetBytes(cdr.Directory))
+                    },
+                    cc.SessionSharedKey), cancellationToken);
+            }
+
+            cc.CurrentWorkingDirectory = cdr.Directory;
+        }
+        else
+        {
+            if (!virtualRoots.TryGetValue(cc.CurrentWorkingDirectory, out TreeNode? virtCwd))
+            {
+                return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                    appContext,
+                    new Status
+                    {
+                        Operation = Operation.Cd,
+                        StatusCode = 404,
+                        StatusMessage = "Current working directory not found",
+                        ResultPayload = ByteString.CopyFrom(Encoding.UTF8.GetBytes(cc.CurrentWorkingDirectory))
+                    },
+                    cc.SessionSharedKey), cancellationToken);
+            }
+
+            var virtChild = virtCwd.Children?.FirstOrDefault(c => string.Compare(c.Value.RelativeName, cdr.Directory, StringComparison.Ordinal) == 0);
+            if (virtChild == null || virtChild.Equals(default(KeyValuePair<string, TreeNode>)))
+            {
+                return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                    appContext,
+                    new Status
+                    {
+                        Operation = Operation.Cd,
+                        StatusCode = 404,
+                        StatusMessage = "Directory not found",
+                        ResultPayload = ByteString.CopyFrom(Encoding.UTF8.GetBytes(cdr.Directory))
+                    },
+                    cc.SessionSharedKey), cancellationToken);
+            }
+
+            if (string.Compare(virtChild.Value.Value.RelativePath, ROOT, StringComparison.Ordinal) == 0)
+                cc.CurrentWorkingDirectory = "/";
+            else
+                cc.CurrentWorkingDirectory = virtChild.Value.Value.RelativePath;
+        }
+
+        var resp = new Status
+        {
+            Operation = Operation.Cd,
+            StatusCode = 200,
+            StatusMessage = cc.CurrentWorkingDirectory,
+        };
 
         return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
             appContext,

@@ -6,7 +6,9 @@ public class TreeNode
 {
     public static readonly TreeNode EmptyRoot = new()
     {
-        Name = "/",
+        RelativeName = "/",
+        RelativePath = "/",
+        AbsolutePath = string.Empty,
         Count = 0,
         DescendentCount = 0,
         Size = uint.MaxValue,
@@ -15,7 +17,9 @@ public class TreeNode
         LastModified = null
     };
 
-    public required string Name { get; init; }
+    public required string RelativeName { get; init; }
+    public required string RelativePath { get; init; }
+    public required string AbsolutePath { get; init; }
     public required uint Size { get; init; }
     public required DateTimeOffset? LastModified { get; init; }
     public required uint DescendentSize { get; set; }

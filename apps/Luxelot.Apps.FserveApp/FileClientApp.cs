@@ -76,7 +76,7 @@ public class FileClientApp : IClientApp
         }, cancellationToken);
     }
 
-    public async Task<bool> SendListRequest(string directory, CancellationToken cancellationToken)
+    public async Task<bool> SendListRequest(string? directory, CancellationToken cancellationToken)
     {
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
@@ -92,8 +92,31 @@ public class FileClientApp : IClientApp
             appContext,
             new ListRequest
             {
-                Directory = directory,
+                Directory = directory ?? string.Empty,
                 Pattern = string.Empty // TODO
+            },
+            SessionSharedKey.Value);
+
+        return await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken);
+    }
+
+    public async Task<bool> SendChangeDirectoryRequest(string directory, CancellationToken cancellationToken)
+    {
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        if (ServerThumbprint == null || SessionSharedKey == null)
+        {
+            appContext.Logger?.LogInformation("Change directory failed, no connection to a server");
+            await appContext.SendConsoleMessage($"Not connected to an fserve.", cancellationToken);
+            return false;
+        }
+
+        var frame = FrameUtils.WrapClientFrame(
+            appContext,
+            new ChangeDirectoryRequest
+            {
+                Directory = directory,
             },
             SessionSharedKey.Value);
 
@@ -170,8 +193,16 @@ public class FileClientApp : IClientApp
         }
         appContext.Logger?.LogInformation("FSERVE Status received from {SourceThumbprint}: {StatusCode} {StatusMessage}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), status.StatusCode, status.StatusMessage);
 
-        await appContext.SendConsoleMessage($"FSERVE Status: {status.StatusCode} {status.StatusMessage}", cancellationToken);
-        return true;
+        switch (status.Operation)
+        {
+            case Operation.Cd:
+                await appContext.SendConsoleMessage($"CD command {(status.StatusCode >= 200 && status.StatusCode <= 299 ? "successful" : "failed")}: {status.StatusMessage}", cancellationToken);
+                return true;
+            default:
+                await appContext.SendConsoleMessage($"FSERVE Status: {status.StatusCode} {status.StatusMessage}", cancellationToken);
+                return true;
+        }
+
     }
 
     public async Task<bool> HandleListResponse(IRequestContext requestContext, ListResponse listResponse, CancellationToken cancellationToken)
@@ -218,11 +249,11 @@ public class FileClientApp : IClientApp
         {
             case "?":
             case "help":
-                await appContext.SendConsoleMessage($"\r\n{InteractiveCommand}> Command List\r\n{InteractiveCommand} >", cancellationToken);
-                var built_in_cmds = new string[] { "version", "exit", "login", "list" };
+                await appContext.SendConsoleMessage($"\r\n{InteractiveCommand}> Command List", cancellationToken);
+                var built_in_cmds = new string[] { "version", "exit", "cd", "login", "list" };
                 var cmd_string = built_in_cmds.Order()
                     .Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}");
-                await appContext.SendConsoleMessage(cmd_string, cancellationToken);
+                await appContext.SendConsoleMessage($"{InteractiveCommand}> {cmd_string}", cancellationToken);
                 await appContext.SendConsoleMessage($"{InteractiveCommand}> End of Command List", cancellationToken);
                 return true;
 
@@ -235,6 +266,12 @@ public class FileClientApp : IClientApp
                 var fsLogin = new LoginCommand();
                 fsLogin.OnInitialize(appContext);
                 return await fsLogin.Invoke(words, cancellationToken);
+
+            case "cd":
+            case "chdir":
+                var fsCd = new ChangeDirectoryCommand();
+                fsCd.OnInitialize(appContext);
+                return await fsCd.Invoke(words, cancellationToken);
 
             case "dir":
             case "ls":
