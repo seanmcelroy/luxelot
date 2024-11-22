@@ -6,6 +6,8 @@ public interface IClientApp
 
     public string InteractiveCommand { get; }
 
+    public List<IConsoleCommand> Commands { get; }
+
     public void OnInitialize(IAppContext appContext);
 
     public Task OnActivate(CancellationToken cancellationToken);

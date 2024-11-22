@@ -55,7 +55,6 @@ public class Node
 
     // Plug-ins
     private readonly List<IServerApp> ServerApps = [];
-    private readonly List<IConsoleCommand> ConsoleCommands = [];
     private readonly List<IClientApp> ClientApps = [];
     private IClientApp? ActiveClientApp = null;
 
@@ -361,25 +360,6 @@ public class Node
                 serverApp.OnNodeInitialize(appContext, appConfig);
                 ServerApps.Add(serverApp);
                 Logger?.LogInformation("Loaded server app {AppName} ({TypeName})", serverApp.Name, serverAppType.FullName);
-            }
-
-            // Load Console Commands
-            var consoleCommandTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IConsoleCommand).FullName) == 0)).ToArray();
-            foreach (var consoleCommandType in consoleCommandTypes)
-            {
-                var objApp = Activator.CreateInstance(consoleCommandType, true);
-#pragma warning disable IDE0019 // Use pattern matching
-                var consoleCommand = objApp as IConsoleCommand;
-#pragma warning restore IDE0019 // Use pattern matching
-                if (consoleCommand == null)
-                {
-                    Logger?.LogError("Unable to load console command {TypeName}", consoleCommandType.FullName);
-                    continue;
-                }
-
-                ConsoleCommands.Add(consoleCommand);
-                consoleCommand.OnInitialize(appContext);
-                Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
             }
 
             // Load Client Apps
@@ -696,17 +676,22 @@ public class Node
         {
             case "?":
             case "help":
-                await context.WriteLineToUserAsync("\r\nCommand List", cancellationToken);
+                var sb = new StringBuilder();
+                sb.AppendLine("\r\nBuilt-In Command List");
                 var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers", "shutdown", "version" };
-                await context.WriteLineToUserAsync(built_in_cmds
-                    .Union(ConsoleCommands.Select(cc => cc.Command.ToLowerInvariant()).ToArray())
+                sb.AppendLine(built_in_cmds
                     .Order()
-                    .Aggregate((c, n) => $"{c}\r\n{n}"), cancellationToken);
-                await context.WriteLineToUserAsync("\r\nAvailable modules:", cancellationToken);
-                await context.WriteLineToUserAsync(ClientApps.Select(ca => ca.InteractiveCommand.ToLowerInvariant())
-                    .Order()
-                    .Aggregate((c, n) => $"{c}\r\n{n}"), cancellationToken);
-                await context.WriteLineToUserAsync("End of Command List", cancellationToken);
+                    .Aggregate((c, n) => $"{c}\r\n{n}"));
+
+                sb.AppendLine("\r\nLoaded apps:\r\n");
+                foreach (var ca in ClientApps.OrderBy(x => x.InteractiveCommand))
+                {
+                    sb.AppendLine($"{ca.InteractiveCommand} - {ca.Name}");
+                    foreach (var com in ca.Commands.OrderBy(x => x.Command))
+                        sb.AppendLine($"\t{com.Command}");
+                }
+                sb.AppendLine("\r\nEnd of Command List");
+                await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
                 break;
 
             case "version":
@@ -806,24 +791,24 @@ public class Node
                 break;
 
             default:
-                // Maybe it's a command we loaded?
-                var appCommand = ConsoleCommands.FirstOrDefault(cc => string.Compare(cc.Command, command, StringComparison.InvariantCultureIgnoreCase) == 0);
-                if (appCommand != null)
+                foreach (var ca in ClientApps)
                 {
-                    var success = await appCommand.Invoke(words, cancellationToken);
-                    return;
+                    // Maybe it's a client app that has an interactive mode?
+                    if (string.Compare(ca.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0)
+                    {
+                        ActiveClientApp = ca;
+                        await ca.OnActivate(cancellationToken);
+                        return;
+                    }
+
+                    // Or maybe it's a command this client app loaded?
+                    var appCommand = ca.Commands.FirstOrDefault(cc => string.Compare(cc.Command, command, StringComparison.InvariantCultureIgnoreCase) == 0);
+                    if (appCommand != null)
+                    {
+                        var success = await appCommand.Invoke(words, cancellationToken);
+                        return;
+                    }
                 }
-
-                // Maybe it's a client app that has an interactive mode?
-                var clientAppCommand = ClientApps.FirstOrDefault(ca => string.Compare(ca.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
-                if (clientAppCommand != null)
-                {
-                    ActiveClientApp = clientAppCommand;
-                    await clientAppCommand.OnActivate(cancellationToken);
-                    return;
-                }
-
-
 
                 await context.WriteLineToUserAsync($"Huh?", cancellationToken);
                 break;

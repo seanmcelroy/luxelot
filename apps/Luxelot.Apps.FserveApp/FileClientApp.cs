@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Reflection;
 using System.Text;
 using Google.Protobuf;
 using Luxelot.Apps.Common;
@@ -23,6 +24,7 @@ public class FileClientApp : IClientApp
     private ImmutableArray<byte>? SessionPrivateKey { get; set; }
     public ImmutableArray<byte>? SessionSharedKey { get; private set; }
     public ImmutableArray<byte>? Principal { get; set; }
+    public List<IConsoleCommand> Commands { get; init; } = [];
 
     public string Name => "Fserve Client";
 
@@ -32,6 +34,25 @@ public class FileClientApp : IClientApp
     {
         ArgumentNullException.ThrowIfNull(appContext);
         this.appContext = appContext;
+
+        // Load Console Commands
+        var consoleCommandTypes = Assembly.GetExecutingAssembly().GetTypes().Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IConsoleCommand).FullName) == 0)).ToArray();
+        foreach (var consoleCommandType in consoleCommandTypes)
+        {
+            var objApp = Activator.CreateInstance(consoleCommandType, true);
+#pragma warning disable IDE0019 // Use pattern matching
+            var consoleCommand = objApp as IConsoleCommand;
+#pragma warning restore IDE0019 // Use pattern matching
+            if (consoleCommand == null)
+            {
+                appContext.Logger?.LogError("Unable to load console command {TypeName}", consoleCommandType.FullName);
+                continue;
+            }
+
+            Commands.Add(consoleCommand);
+            consoleCommand.OnInitialize(appContext);
+            appContext.Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
+        }
 
         Reset();
     }
@@ -54,6 +75,15 @@ public class FileClientApp : IClientApp
         SessionPublicKey = publicKeyBytes;
         SessionPrivateKey = privateKeyBytes;
         SessionSharedKey = null;// Computed after AuthChannelResponse received
+    }
+
+    public async Task<(bool handled, bool success)> TryInvokeCommand(string command, string[] words, CancellationToken cancellationToken)
+    {
+        var appCommand = Commands.FirstOrDefault(cc => string.Compare(cc.Command, command, StringComparison.InvariantCultureIgnoreCase) == 0);
+        if (appCommand == null)
+            return (false, false);
+        var success = await appCommand.Invoke(words, cancellationToken);
+        return (true, success);
     }
 
     public async Task<bool> SendAuthChannelBegin(ImmutableArray<byte> destinationThumbprint, string username, CancellationToken cancellationToken)
@@ -245,16 +275,17 @@ public class FileClientApp : IClientApp
         var words = QuotedWordArrayRegex().Split(input).Where(s => s.Length > 0).ToArray();
         var command = words.First();
 
+        var sb = new StringBuilder();
+
         switch (command.ToLowerInvariant())
         {
             case "?":
             case "help":
-                await appContext.SendConsoleMessage($"\r\n{InteractiveCommand}> Command List", cancellationToken);
+                sb.AppendLine($"\r\n{InteractiveCommand}> Command List");
                 var built_in_cmds = new string[] { "version", "exit", "cd", "login", "list" };
-                var cmd_string = built_in_cmds.Order()
-                    .Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}");
-                await appContext.SendConsoleMessage($"{InteractiveCommand}> {cmd_string}", cancellationToken);
-                await appContext.SendConsoleMessage($"{InteractiveCommand}> End of Command List", cancellationToken);
+                sb.AppendLine($"{InteractiveCommand}> {built_in_cmds.Order().Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}")}");
+                sb.AppendLine($"{InteractiveCommand}> End of Command List");
+                await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
                 return true;
 
             case "version":
