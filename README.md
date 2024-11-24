@@ -54,6 +54,8 @@ Luxelot does not yet have a discovery mechanism.  Nodes must be explicitly confi
 
 Luxelot is a network of peer-to-peer nodes connected over the Internet.  However, Luxelot is not intended to provide onion routing or other relays to access the Internet through Luxelot.  For this reason, there are no proxy or other configurations that allow Luxelot to serve access to the public web or other Internet services.  Luxelot is more of a darknet in that it is a network of services and content, but not necessarily a dark web, since that content is not natively web-based or browser-accessible.
 
+Luxelot is a message-passing network, it is not an Internet Protocol (IP) tunnel or proxy.  For this reason, Luxelot is not designed to provide real-time or streaming services, and applications must be resilient to latency and non-delivery.  In other words, you cannot "browse the web" over Luxelot.  You can use apps and services for Luxelot that are unrelated to existing IP network services.
+
 ## How To
 
 This is a very alpha concept build.

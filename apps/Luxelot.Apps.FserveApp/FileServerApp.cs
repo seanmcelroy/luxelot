@@ -146,7 +146,7 @@ public class FserveApp : IServerApp
             ClientConnections.Remove(cacheKey, out _);
         }
 
-        var (encapsulatedKey, sessionSharedKey) = appContext.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey([.. acb.SessionPubKey.ToByteArray()]);
+        var (encapsulatedKey, sessionSharedKey) = appContext.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey([.. acb.SessionPubKey.ToByteArray()], appContext.Logger);
 
         //appContext.Logger?.LogCritical("SERVER FSERV SESSION KEY: {SessionSharedKey}", DisplayUtils.BytesToHex(sessionSharedKey));
 
@@ -383,7 +383,7 @@ public class FserveApp : IServerApp
                 }
             }
         }
-        catch (UnauthorizedAccessException uae)
+        catch (UnauthorizedAccessException)
         {
             // Swallow.
         }

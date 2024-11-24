@@ -217,10 +217,16 @@ public class Node
             }
         }
 
+        Logger?.LogTrace("Setting up loopback peer");
+        {
+            var loopbackEndpoint = new IPEndPoint(IPAddress.IPv6Loopback, IPEndPoint.MaxPort);
+            Peers.TryAdd(loopbackEndpoint, new Peer(Logger));
+        }
+
         Logger?.LogTrace("Setting up user listener loop");
         {
             var user_listener_task = Task.Run(async () => await UserListenerTask(nodeContext, cts.Token), cancellationToken);
-            var user_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            var user_listener_task_entry = new TaskEntry { Name = "User listener loop", EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(user_listener_task_entry, user_listener_task);
             Logger?.LogTrace("User listener loop is a persistent background worker task {TaskId}", user_listener_task_entry.TaskId);
         }
@@ -228,7 +234,7 @@ public class Node
         Logger?.LogTrace("Setting up peer listener loop");
         {
             var peer_listener_task = Task.Run(async () => await PeerListenerTask(nodeContext, cts.Token), cancellationToken);
-            var peer_listener_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            var peer_listener_task_entry = new TaskEntry { Name = "Peer listener loop", EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_listener_task_entry, peer_listener_task);
             Logger?.LogTrace("Peer listener loop is a persistent background worker task {TaskId}", peer_listener_task_entry.TaskId);
         }
@@ -236,7 +242,7 @@ public class Node
         Logger?.LogTrace("Setting up peer janitor loop");
         {
             var peer_janitor_task = Task.Run(() => PeerJanitorTask(cts.Token), cancellationToken);
-            var peer_janitor_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            var peer_janitor_task_entry = new TaskEntry { Name = "Peer janitor loop", EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_janitor_task_entry, peer_janitor_task);
             Logger?.LogTrace("Peer janitor loop is a persistent background worker task {TaskId}", peer_janitor_task_entry.TaskId);
         }
@@ -244,7 +250,7 @@ public class Node
         Logger?.LogTrace("Setting up peer dialer loop");
         {
             var peer_dialer_task = Task.Run(() => PeerDialerTask(nodeContext, cts.Token), cancellationToken);
-            var dialer_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            var dialer_task_entry = new TaskEntry { Name = "Peer dialer", EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(dialer_task_entry, peer_dialer_task);
             Logger?.LogTrace("Dialer loop is a persistent background worker task {TaskId}", dialer_task_entry.TaskId);
         }
@@ -252,7 +258,7 @@ public class Node
         Logger?.LogTrace("Setting up peer connected input handler loop");
         {
             var peer_handler_task = Task.Run(() => PeerHandleInputTask(nodeContext, cts.Token), cancellationToken);
-            var peer_handler_task_entry = new TaskEntry { EventType = TaskEventType.PersistentBackgroundWorker };
+            var peer_handler_task_entry = new TaskEntry { Name = "Peer connected input handler", EventType = TaskEventType.PersistentBackgroundWorker };
             Tasks.TryAdd(peer_handler_task_entry, peer_handler_task);
             Logger?.LogTrace("Peer input handler loop is a persistent background worker task {TaskId}", peer_handler_task_entry.TaskId);
         }
@@ -307,7 +313,7 @@ public class Node
                         {
                             if (Tasks.TryRemove(t))
                             {
-                                Logger?.LogTrace("Removed completed task {TaskId}", t.Key.TaskId);
+                                Logger?.LogTrace("Removed completed task {TaskId} ({TaskName})", t.Key.TaskId, t.Key.Name);
                                 taskQueueSkip = taskIndex;
                                 goto task_walk_again;
                             }
@@ -480,16 +486,16 @@ public class Node
                     Logger?.LogDebug("New peer connection from {RemoteEndPoint}", peerTcpClient.Client?.RemoteEndPoint);
                     var peer = Peer.CreatePeerFromAccept(peerTcpClient);
                     _ = Peers.TryAdd(peer.RemoteEndPoint!, peer);
-                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
+                    Tasks.TryAdd(new TaskEntry { Name = $"Accept connection from {peerTcpClient.Client?.RemoteEndPoint?.ToString() ?? "new peer"}", EventType = TaskEventType.FireOnce }, Task.Run(async () =>
                     {
                         var shutdown = !await peer.HandleSyn(context, cancellationToken);
                         if (shutdown)
-                            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                            Tasks.TryAdd(new TaskEntry { Name = $"Shutdown after Syn from {peerTcpClient.Client?.RemoteEndPoint?.ToString() ?? "new peer"}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                         else if (peer.IdentityPublicKeyThumbprint == null
                             || peer.IdentityPublicKey == null)
                         {
                             Logger?.LogError("Identity public key malformed or not initialized after Syn handled.");
-                            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                            Tasks.TryAdd(new TaskEntry { Name = $"Shutdown after malfored key on Syn from {peerTcpClient.Client?.RemoteEndPoint?.ToString() ?? "new peer"}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                         }
                         else
                             ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
@@ -515,7 +521,7 @@ public class Node
                 var activeConnections = IPGlobalProperties.GetIPGlobalProperties()
                     .GetActiveTcpConnections();
 
-                foreach (var peer in Peers.Values)
+                foreach (var peer in Peers.Values.Where(p => !p.IsLoopback))
                 {
                     var peer_tcp_info = activeConnections
                             .SingleOrDefault(x => x.LocalEndPoint.Equals(peer.LocalEndPoint)
@@ -523,7 +529,7 @@ public class Node
                             );
                     var peer_state = peer_tcp_info != null ? peer_tcp_info.State : TcpState.Unknown;
                     if (peer_state != TcpState.Established || !peer.IsWriteable)
-                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                        Tasks.TryAdd(new TaskEntry { Name = $"Shutdown dead peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                 }
             }
         }
@@ -533,30 +539,35 @@ public class Node
             throw;
         }
     }
+
     private async Task PeerDialerTask(NodeContext context, CancellationToken cancellationToken)
     {
-        while (Phonebook == null || Phonebook.Length == 0)
-        {
-            // Sleep for one hour.
-            Logger?.LogDebug("No entries in the phone book; dialer sleeping for one hour.");
-            Thread.Sleep(60 * 60000);
-        }
-
         try
         {
-            Thread.Sleep(5000); // Dialer starts after 5 seconds.
-            do
+            Thread.Sleep(3000); // Dialer starts after 3 seconds.
+            while (!cancellationToken.IsCancellationRequested)
             {
-                foreach (var endpoint in Phonebook)
+                var pb = Phonebook;
+                if (pb == null || pb.Length == 0)
+                {
+                    // Sleep for one hour.
+                    Logger?.LogDebug("No entries in the phone book; dialer sleeping for one hour.");
+                    Thread.Sleep(60 * 60000);
+                    continue;
+                }
+
+                foreach (var endpoint in pb)
                 {
                     var peer = await Peer.CreatePeerAndConnect(endpoint, Logger, cancellationToken);
                     if (peer == null)
                         continue;
                     var added = Peers.TryAdd(peer.RemoteEndPoint!, peer);
-                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(context, peer, cancellationToken), cancellationToken));
+                    Tasks.TryAdd(new TaskEntry { Name = $"Dialing out to peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(context, peer, cancellationToken), cancellationToken));
                 }
 
-                foreach (var peer in Peers.Values)
+                Thread.Sleep(10 * 60000); // Wait 10 seconds before queuing dead peer tasks.
+
+                foreach (var peer in Peers.Values.Where(p => !p.IsLoopback))
                 {
                     var peer_tcp_info = IPGlobalProperties.GetIPGlobalProperties()
                             .GetActiveTcpConnections()
@@ -565,10 +576,10 @@ public class Node
                             );
                     var peer_state = peer_tcp_info != null ? peer_tcp_info.State : TcpState.Unknown;
                     if (peer_state != TcpState.Established || !peer.IsWriteable)
-                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                        Tasks.TryAdd(new TaskEntry { Name = $"Shutting down dead or non-responsive peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                 }
                 Thread.Sleep(5 * 60000); // Dialer then runs every 5 minutes.
-            } while (!cancellationToken.IsCancellationRequested);
+            };
         }
         catch (Exception ex)
         {
@@ -581,19 +592,17 @@ public class Node
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (Thread.Yield())
-                Thread.Sleep(200);
+            Thread.Sleep(100);
 
             // Peer walk
-            foreach (var peer in Peers.Values)
+            await Parallel.ForEachAsync(Peers.Values, cancellationToken, async (peer, c) =>
             {
                 var shutdown = !await peer.HandleInputAsync(context, ThumbprintSignatureCache, cancellationToken);
                 if (shutdown)
                 {
-                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
-                    continue;
+                    Tasks.TryAdd(new TaskEntry { Name = $"Shutting down killed peer {peer.ShortName} ({peer.RemoteEndPoint})", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                 }
-            }
+            });
         }
     }
 
@@ -606,18 +615,18 @@ public class Node
             Logger?.LogDebug("Sending Syn to peer {LocalEndPoint}->{RemoteEndPoint}", peer.LocalEndPoint, peer.RemoteEndPoint);
             await peer.SendSyn(context, cancellationToken);
 
-            Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(async () =>
+            Tasks.TryAdd(new TaskEntry { Name = $"Wait for and handle ACK from peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(async () =>
             {
                 var shutdown = !await peer.HandleAck(context, cancellationToken);
                 if (shutdown)
                 {
-                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                    Tasks.TryAdd(new TaskEntry { Name = $"Shutting down at ACK handle for peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                 }
                 else if (peer.IdentityPublicKeyThumbprint == null
                     || peer.IdentityPublicKey == null)
                 {
                     Logger?.LogError("Identity public key malformed or not initialized after Ack handled.");
-                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                    Tasks.TryAdd(new TaskEntry { Name = $"Shutting down at ACK handle for bad key for peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                 }
                 else
                 {
@@ -640,7 +649,7 @@ public class Node
                     {
                         Logger?.LogError(ex, "Failed to send sample message; closing down connection to victim {PeerShortName} ({RemoteEndPoint}).", peer.ShortName, peer.RemoteEndPoint);
                         peer.CloseInternal();
-                        Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                        Tasks.TryAdd(new TaskEntry { Name = $"Kill unsendable peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                     }
                 }
 
@@ -676,24 +685,30 @@ public class Node
         {
             case "?":
             case "help":
-                var sb = new StringBuilder();
-                sb.AppendLine("\r\nBuilt-In Command List");
-                var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers", "shutdown", "version" };
-                sb.AppendLine(built_in_cmds
-                    .Order()
-                    .Aggregate((c, n) => $"{c}\r\n{n}"));
-
-                sb.AppendLine("\r\nLoaded apps:\r\n");
-                foreach (var ca in ClientApps.OrderBy(x => x.InteractiveCommand))
                 {
-                    sb.AppendLine($"{ca.InteractiveCommand} - {ca.Name}");
-                    foreach (var com in ca.Commands.OrderBy(x => x.Command))
-                        sb.AppendLine($"\t{com.Command}");
-                }
-                sb.AppendLine("\r\nEnd of Command List");
-                await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
-                break;
+                    var sb = new StringBuilder();
+                    sb.AppendLine("\r\nBuilt-In Command List");
+                    var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers", "shutdown", "version" };
+                    sb.AppendLine(built_in_cmds
+                        .Order()
+                        .Aggregate((c, n) => $"{c}\r\n{n}"));
 
+                    if (ClientApps.Count > 0)
+                        sb.AppendLine("\r\nLoaded apps:");
+                    foreach (var ca in ClientApps.OrderBy(x => x.InteractiveCommand ?? x.Name))
+                    {
+                        if (ca.InteractiveCommand != null)
+                            sb.AppendLine($"\r\n{ca.InteractiveCommand} - {ca.Name}");
+                        else
+                            sb.AppendLine($"{ca.Name}");
+
+                        foreach (var com in ca.Commands.OrderBy(x => x.Command))
+                            sb.AppendLine($"\t{com.Command}");
+                    }
+                    sb.AppendLine("\r\nEnd of Command List");
+                    await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
+                    break;
+                }
             case "version":
                 var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
                 await context.WriteLineToUserAsync($"Luxelot v{version} running on node {ShortName}", cancellationToken);
@@ -764,7 +779,7 @@ public class Node
                         return;
 
                     var added = Peers.TryAdd(peer.RemoteEndPoint!, peer);
-                    Tasks.TryAdd(new TaskEntry { EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(context, peer, cancellationToken), cancellationToken));
+                    Tasks.TryAdd(new TaskEntry { Name = $"Send SYN to peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(() => SendSyn(context, peer, cancellationToken), cancellationToken));
                     await context.WriteLineToUserAsync($"New peer created.", cancellationToken);
                     break;
                 }
@@ -775,17 +790,20 @@ public class Node
                 return;
 
             case "peers":
-                await context.WriteLineToUserAsync("\r\nPeer List", cancellationToken);
-                var state_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.State.ToString().Length);
-                var rep_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
-                await context.WriteLineToUserAsync($"PeerShortName {"State".PadRight(state_len)} {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint", cancellationToken);
-                foreach (var peer in Peers.Values)
                 {
-                    await context.WriteLineToUserAsync($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State.ToString().PadRight(state_len)} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived.ToString().PadRight("Recv".Length)} {peer.BytesSent.ToString().PadRight("Sent".Length)} {DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}", cancellationToken);
+                    var sb = new StringBuilder();
+                    sb.AppendLine("\r\nPeer List");
+                    var state_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.State.ToString().Length);
+                    var rep_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
+                    sb.AppendLine($"PeerShortName {"State".PadRight(state_len)} {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint");
+                    foreach (var peer in Peers.Values)
+                    {
+                        sb.AppendLine($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State.ToString().PadRight(state_len)} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived.ToString().PadRight("Recv".Length)} {peer.BytesSent.ToString().PadRight("Sent".Length)} {DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}");
+                    }
+                    sb.AppendLine("End of Peer List");
+                    await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
+                    break;
                 }
-                await context.WriteLineToUserAsync("End of Peer List", cancellationToken);
-                break;
-
             case "shutdown":
                 Environment.Exit(0);
                 break;
@@ -794,7 +812,7 @@ public class Node
                 foreach (var ca in ClientApps)
                 {
                     // Maybe it's a client app that has an interactive mode?
-                    if (string.Compare(ca.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0)
+                    if (ca.InteractiveCommand != null && string.Compare(ca.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0)
                     {
                         ActiveClientApp = ca;
                         await ca.OnActivate(cancellationToken);
@@ -806,6 +824,8 @@ public class Node
                     if (appCommand != null)
                     {
                         var success = await appCommand.Invoke(words, cancellationToken);
+                        if (!success)
+                            await context.WriteLineToUserAsync($"ERROR: {appCommand.Command}", cancellationToken);
                         return;
                     }
                 }
@@ -894,18 +914,31 @@ public class Node
         if (Enumerable.SequenceEqual(destinationIdPubKeyThumbprint, IdentityKeyPublicThumbprint))
             throw new ArgumentException("Attempted to prepare direct messages to my own node", nameof(destinationIdPubKeyThumbprint));
 
-        var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPublicBytes]);
-        var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPrivateBytes], pub);
-
-        var nodeSigner = new DilithiumSigner();
-        nodeSigner.Init(true, pri);
         var packed_payload = Any.Pack(payload);
-        var signature = nodeSigner.GenerateSignature(packed_payload.ToByteArray());
+
+        // If destined for loopback, then source is also loopback
+        ByteString src;
+        byte[] signature;
+        if (destinationIdPubKeyThumbprint.All(b => b == 0x00))
+        {
+            src = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]);
+            signature = []; // No reason to sign loopback messages
+        }
+        else
+        {
+            src = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]);
+            var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPublicBytes]);
+            var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPrivateBytes], pub);
+
+            var nodeSigner = new DilithiumSigner();
+            nodeSigner.Init(true, pri);
+            signature = nodeSigner.GenerateSignature(packed_payload.ToByteArray());
+        }
 
         var dm = new DirectedMessage
         {
             // The source is my own node.
-            SrcIdentityThumbprint = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]),
+            SrcIdentityThumbprint = src,
             // The desitnation is some other node I know by its thumbprint.
             DstIdentityThumbprint = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]),
             Payload = packed_payload,
@@ -945,7 +978,7 @@ public class Node
         ArgumentNullException.ThrowIfNull(original);
         ArgumentNullException.ThrowIfNull(logger);
 
-        foreach (var peer in Peers.Values)
+        foreach (var peer in Peers.Values.Where(p => !p.IsLoopback))
         {
             var envelope = peer.PrepareEnvelope(original, logger);
             await peer.SendEnvelope(envelope, logger, cancellationToken);
@@ -989,7 +1022,7 @@ public class Node
             Signature = original.Signature,
         };
 
-        foreach (var peer in Peers.Values)
+        foreach (var peer in Peers.Values.Where(p => !p.IsLoopback))
         {
             if (excludedNeighborThumbprint != null
                 && peer.IdentityPublicKeyThumbprint != null
@@ -1024,6 +1057,10 @@ public class Node
             throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
         if (publicKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
             throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Public key should be {Constants.KYBER_PUBLIC_KEY_LEN} bytes long but was {publicKey.Length} bytes.");
+
+        // Don't add loopback
+        if (thumbprint.All(b => b == 0x00))
+            return false;
 
         // Verify these match - be paranoid.
         if (!Enumerable.SequenceEqual(thumbprint, SHA256.HashData([.. publicKey])))

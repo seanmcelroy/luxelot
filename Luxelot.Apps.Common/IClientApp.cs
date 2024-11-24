@@ -4,7 +4,7 @@ public interface IClientApp
 {
     public string Name { get; }
 
-    public string InteractiveCommand { get; }
+    public string? InteractiveCommand { get; }
 
     public List<IConsoleCommand> Commands { get; }
 

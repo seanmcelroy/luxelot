@@ -38,12 +38,10 @@ public static class CryptoUtils
         using (logger?.BeginScope($"Crypto setup"))
         {
             // Generate Kyber crypto material for our comms with this peer.
-            logger?.LogInformation("Generating cryptographic key material");
             AsymmetricCipherKeyPair node_key;
             try
             {
-                node_key = GenerateKyberKeyPairInternal();
-                logger?.LogDebug("Geneated Kyber key pair!");
+                node_key = GenerateKyberKeyPairInternal(logger);
             }
             catch (Exception ex)
             {
@@ -60,7 +58,7 @@ public static class CryptoUtils
             //+ $"Encryption key length: {encryptionKey.Length} key: {CryptoUtils.BytesToHex(encryptionKey)}\r\n"
             //+ $"Encapsulated key length: {encapsulatedKey.Length} key: {CryptoUtils.BytesToHex(encapsulatedKey)}");
 
-            privateKeyBytes = CryptoUtils.GetChrystalsKyberPrivateKeyFromEncoded(node_key);
+            privateKeyBytes = GetChrystalsKyberPrivateKeyFromEncoded(node_key);
             //decryptionKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey);
             //var keysAreEqual = Enumerable.SequenceEqual(encryptionKey, decryptionKey);
 
@@ -68,9 +66,9 @@ public static class CryptoUtils
             //    + $"Decryption key length: {decryptionKey.Length} key: {CryptoUtils.BytesToHex(decryptionKey)}"
             //    + $"Decryption key is equal to encryption key: {keysAreEqual}");
 
-            logger?.LogTrace("Generated private key length: {PrivateKeyByteLength}", privateKeyBytes.Length);
-            publicKeyBytes = CryptoUtils.GetChrystalsKyberPublicKeyFromEncoded(node_key);
-            logger?.LogTrace("Generated public key length: {PublicKeyByteLength}", publicKeyBytes.Length);
+            //logger?.LogTrace("Generated private key length: {PrivateKeyByteLength}", privateKeyBytes.Length);
+            publicKeyBytes = GetChrystalsKyberPublicKeyFromEncoded(node_key);
+            //logger?.LogTrace("Generated public key length: {PublicKeyByteLength}", publicKeyBytes.Length);
 
             logger?.LogDebug("Key pairs successfully generated");
         }
@@ -78,7 +76,7 @@ public static class CryptoUtils
         return (publicKeyBytes.ToImmutableArray(), privateKeyBytes.ToImmutableArray());
     }
 
-    private static AsymmetricCipherKeyPair GenerateKyberKeyPairInternal()
+    private static AsymmetricCipherKeyPair GenerateKyberKeyPairInternal(ILogger? logger)
     {
         // These keys are used for PEER (neighor across the network) CHANNEL ENCRYPTION.
         // A shared key is established using the Kyber KEM process,
@@ -86,11 +84,22 @@ public static class CryptoUtils
 
         AsymmetricCipherKeyPair key_pair;
 
-        var okay = mutex.WaitOne(10000);
-        if (!okay)
+        // Exponential backoff
+        const int baseBackoff = 100;
+        var failcount = 0;
+        var backoff = baseBackoff;
+        bool okay;
+        do
         {
-            throw new InvalidOperationException();
-        }
+            okay = mutex.WaitOne(backoff);
+            if (!okay)
+            {
+                failcount++;
+                backoff = (int)Math.Pow(baseBackoff, failcount + 1);
+            }
+        } while (!okay);
+        logger?.LogTrace("Acquired GenerateKyberKeyPairInternal mutex after {Backoff}ms", backoff);
+
         try
         {
             KyberKeyGenerationParameters kyber_generation_parameters = new(SecureRandom, KyberParameters.kyber1024);
@@ -124,10 +133,10 @@ public static class CryptoUtils
         return privateKeyBytes;
     }
 
-    public static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey)
+    public static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(publicKey);
-        var secretKeyWithEncapsulationSender = GenerateChrystalsKyberEncryptionKey(publicKey);
+        var secretKeyWithEncapsulationSender = GenerateChrystalsKyberEncryptionKey(publicKey, logger);
 
         // Shared Key
         var encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
@@ -138,18 +147,29 @@ public static class CryptoUtils
         return (encapsulatedKey, sessionSharedKey);
     }
 
-    private static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ImmutableArray<byte> publicKeyBytes)
+    private static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ImmutableArray<byte> publicKeyBytes, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(publicKeyBytes);
 
         KyberPublicKeyParameters publicKey = new(KyberParameters.kyber1024, [.. publicKeyBytes]);
         ISecretWithEncapsulation secret_with_encapsulation;
 
-        var okay = mutex.WaitOne(10000);
-        if (!okay)
+        // Exponential backoff
+        const int baseBackoff = 100;
+        var failcount = 0;
+        var backoff = baseBackoff;
+        bool okay;
+        do
         {
-            throw new InvalidOperationException();
-        }
+            okay = mutex.WaitOne(backoff);
+            if (!okay)
+            {
+                failcount++;
+                backoff = (int)Math.Pow(baseBackoff, failcount + 1);
+            }
+        } while (!okay);
+        logger?.LogTrace("Acquired GenerateChrystalsKyberEncryptionKey mutex after {Backoff}ms", backoff);
+
         try
         {
             KyberKemGenerator kem_generator = new(SecureRandom);
@@ -163,27 +183,38 @@ public static class CryptoUtils
         return secret_with_encapsulation;
     }
 
-    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey)
+    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(privateKeyBytes);
         ArgumentNullException.ThrowIfNull(encapsulatedKey);
 
         var privateKey = new KyberPrivateKeyParameters(KyberParameters.kyber1024, [.. privateKeyBytes]);
-        return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey);
+        return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey, logger);
     }
 
-    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte> encapsulatedKey)
+    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(privateKey);
         ArgumentNullException.ThrowIfNull(encapsulatedKey);
 
         byte[] key_bytes;
 
-        var okay = mutex.WaitOne(10000);
-        if (!okay)
+        // Exponential backoff
+        const int baseBackoff = 100;
+        var failcount = 0;
+        var backoff = baseBackoff;
+        bool okay;
+        do
         {
-            throw new InvalidOperationException();
-        }
+            okay = mutex.WaitOne(backoff);
+            if (!okay)
+            {
+                failcount++;
+                backoff = (int)Math.Pow(baseBackoff, failcount + 1);
+            }
+        } while (!okay);
+        logger?.LogTrace("Acquired GenerateChrystalsKyberDecryptionKey mutex after {Backoff}ms", backoff);
+
         try
         {
             KyberKemExtractor extractor = new(privateKey);
@@ -197,46 +228,66 @@ public static class CryptoUtils
         return [.. key_bytes];
     }
 
-    public static Envelope EncryptEnvelopeInternal(byte[] envelopePayload, ImmutableArray<byte> sharedKey, ILogger? logger)
+    public static Envelope EncryptEnvelopeInternal(byte[] envelopePayload, ImmutableArray<byte>? sharedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(envelopePayload);
-        ArgumentNullException.ThrowIfNull(sharedKey);
 
+        Envelope envelope;
         byte[] nonce = new byte[12];
         byte[] plain_text = envelopePayload;
         byte[] cipher_text = new byte[plain_text.Length];
         byte[] tag = new byte[16];
         byte[]? associated_data = null;
-        try
-        {
-            using ChaCha20Poly1305 cha = new([.. sharedKey]);
-            RandomNumberGenerator.Fill(nonce);
-            RandomNumberGenerator.Fill(associated_data);
-            cha.Encrypt(nonce, plain_text, cipher_text, tag, associated_data);
-        }
-        catch (Exception ex)
-        {
-            logger?.LogError(ex, "Failed to encrypt payload");
-            throw;
-        }
 
-        var envelope = new Envelope
+        if (sharedKey == null)
         {
-            Nonce = ByteString.CopyFrom(nonce),
-            Ciphertext = ByteString.CopyFrom(cipher_text),
-            Tag = ByteString.CopyFrom(tag),
-            AssociatedData = associated_data == null ? ByteString.Empty : ByteString.CopyFrom(associated_data)
-        };
+            // Loopback
+            envelope = new Envelope
+            {
+                Nonce = ByteString.CopyFrom(nonce),
+                Ciphertext = ByteString.CopyFrom(plain_text), // No encryption for loopback
+                Tag = ByteString.CopyFrom(tag),
+                AssociatedData = associated_data == null ? ByteString.Empty : ByteString.CopyFrom(associated_data)
+            };
+        }
+        else
+        {
+            try
+            {
+                using ChaCha20Poly1305 cha = new([.. sharedKey]);
+                RandomNumberGenerator.Fill(nonce);
+                RandomNumberGenerator.Fill(associated_data);
+                cha.Encrypt(nonce, plain_text, cipher_text, tag, associated_data);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Failed to encrypt payload");
+                throw;
+            }
+
+            envelope = new Envelope
+            {
+                Nonce = ByteString.CopyFrom(nonce),
+                Ciphertext = ByteString.CopyFrom(cipher_text),
+                Tag = ByteString.CopyFrom(tag),
+                AssociatedData = associated_data == null ? ByteString.Empty : ByteString.CopyFrom(associated_data)
+            };
+        }
 
         //MessageUtils.Dump(envelope, logger);
         //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
         return envelope;
     }
 
-    public static byte[] DecryptEnvelopeInternal(Envelope envelope, ImmutableArray<byte> sharedKey, ILogger? logger)
+    public static byte[] DecryptEnvelopeInternal(Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(envelope);
-        ArgumentNullException.ThrowIfNull(sharedKey);
+
+        if (sharedKey == null)
+        {
+            // Loopback
+            return envelope.Ciphertext.ToByteArray();
+        }
 
         //MessageUtils.Dump(envelope, logger);
 

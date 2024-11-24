@@ -15,6 +15,7 @@ namespace Luxelot;
 internal class Peer : IDisposable
 {
     private bool disposed = false;
+    public bool IsLoopback { get; private init; } = false;
 
     public string Name { get; private set; } = "<Unset>";
     public string ShortName { get; private set; } = "<Unset>";
@@ -23,20 +24,34 @@ internal class Peer : IDisposable
     public ImmutableArray<byte>? SessionPublicKey { get; init; }
     private ImmutableArray<byte>? SessionPrivateKey { get; init; }
     public ImmutableArray<byte>? SessionSharedKey { get; private set; }
-    private TcpClient Client { get; init; }
+    private TcpClient? Client { get; init; }
 
     // State
     public PeerState State { get; private set; } = PeerState.CLOSED;
     public DateTimeOffset LastActivity { get; set; } = DateTimeOffset.Now;
+    private Stream? LoopbackStream { get; init; }
+    private Stream? Stream { get => IsLoopback ? LoopbackStream : Client?.GetStream(); }
 
     // Metrics
     public ulong BytesReceived { get; private set; } = 0;
     public ulong BytesSent { get; private set; } = 0;
 
-    public EndPoint? LocalEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client.Client?.LocalEndPoint;
-    public EndPoint? RemoteEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client.Client?.RemoteEndPoint;
-    public bool IsReadable => !disposed && Client.Connected && Client.GetStream().CanRead;
-    public bool IsWriteable => !disposed && Client.Connected && Client.GetStream().CanWrite;
+    public EndPoint? LocalEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client?.Client?.LocalEndPoint;
+    public EndPoint? RemoteEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client?.Client?.RemoteEndPoint;
+    public bool IsReadable => !disposed && (IsLoopback || (Client!.Connected && Client.GetStream().CanRead));
+    public bool IsWriteable => !disposed && (IsLoopback || (Client!.Connected && Client.GetStream().CanWrite));
+
+    // For creating a loopback peer
+    internal Peer(ILogger? logger)
+    {
+        IsLoopback = true;
+        LoopbackStream = new LoopbackStream(logger);
+        State = PeerState.ESTABLISHED;
+
+        IdentityPublicKeyThumbprint = new byte[Constants.THUMBPRINT_LEN].ToImmutableArray();
+        Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
+        ShortName = $"{Name[..8]}";
+    }
 
     private Peer(TcpClient tcpClient)
     {
@@ -87,27 +102,36 @@ internal class Peer : IDisposable
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(thumbprintSignatureCache);
-        ObjectDisposedException.ThrowIf(disposed, Client);
+        if (!IsLoopback)
+            ObjectDisposedException.ThrowIf(disposed, Client!);
 
-        if (SessionSharedKey == null || Client.Available == 0)
-        {
+        if (!IsLoopback && (SessionSharedKey == null || Client!.Available == 0))
             return true; // We don't need to shut it down, we just don't need to do anything here.
-        }
 
         // Fully established with data to read.
         var buffer = new byte[16 * 1024]; // 16 kb
         int size;
         try
         {
-            size = await Client.GetStream().ReadAtLeastAsync(buffer, 1, cancellationToken: cancellationToken);
+            size = await Stream!.ReadAtLeastAsync(buffer, 1, throwOnEndOfStream: false, cancellationToken: cancellationToken);
+            if (size == 0)
+            {
+                if (IsLoopback)
+                    return true;
+                else
+                {
+                    nodeContext.Logger?.LogWarning("End of stream from peer {PeerShortName} ({RemoteEndPoint}) could be processed. Closing.", ShortName, RemoteEndPoint);
+                    Client?.Close();
+                    return false;
+                }
+            }
             BytesReceived += (ulong)size;
-            //nodeContext.Logger?.LogTrace("HandleInputAsync read {BytesReceived} bytes", size);
             LastActivity = DateTimeOffset.Now;
         }
         catch (EndOfStreamException ex)
         {
             nodeContext.Logger?.LogWarning(ex, "End of stream from peer {PeerShortName} ({RemoteEndPoint}) could be processed. Closing.", ShortName, RemoteEndPoint);
-            Client.Close();
+            Client?.Close();
             return false;
         }
 
@@ -119,7 +143,7 @@ internal class Peer : IDisposable
         catch (InvalidProtocolBufferException ex)
         {
             nodeContext.Logger?.LogError(ex, "Invalid Envelope from {PeerShortName} ({RemoteEndPoint}) could not be parsed. Closing.", ShortName, RemoteEndPoint);
-            Client.Close();
+            Client?.Close();
             return false;
         }
 
@@ -128,13 +152,14 @@ internal class Peer : IDisposable
         //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
 
         byte[] envelope_plain_text;
-        try {
-            envelope_plain_text = CryptoUtils.DecryptEnvelopeInternal(envelope, SessionSharedKey.Value, nodeContext.Logger);
+        try
+        {
+            envelope_plain_text = CryptoUtils.DecryptEnvelopeInternal(envelope, SessionSharedKey, nodeContext.Logger);
         }
         catch
         {
             // Swallow.  Anything worth logging is handled by DecryptEnvelopeInternal() before rethrowing to here.
-            Client.Close();
+            Client?.Close();
             return false;
         }
 
@@ -146,7 +171,7 @@ internal class Peer : IDisposable
         catch (InvalidProtocolBufferException ex)
         {
             nodeContext.Logger?.LogError(ex, "Invalid EnvelopePayload from {PeerShortName} ({RemoteEndPoint}) could not be parsed. Closing.", ShortName, RemoteEndPoint);
-            Client.Close();
+            Client?.Close();
             return false;
         }
 
@@ -178,10 +203,10 @@ internal class Peer : IDisposable
             }
 
             // Is the forwarded message purportedly from ME?  That's bogus, close client.
-            if (fwd.SrcIdentityThumbprint.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint))
+            if (!IsLoopback && fwd.SrcIdentityThumbprint.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint))
             {
                 nodeContext.Logger?.LogError("Peer {PeerShortName} forwarded message to me purportedly from myself: ForwardId={ForwardId}", ShortName, fwd.ForwardId);
-                Client.Close();
+                Client?.Close();
                 return false;
             }
 
@@ -190,7 +215,7 @@ internal class Peer : IDisposable
                 && fwd.DstIdentityThumbprint.SequenceEqual(IdentityPublicKeyThumbprint.Value))
             {
                 nodeContext.Logger?.LogError("Peer {PeerShortName} forwarded message to me destined for itself: ForwardId={ForwardId}", ShortName, fwd.ForwardId);
-                Client.Close();
+                Client?.Close();
                 return false;
             }
 
@@ -226,7 +251,7 @@ internal class Peer : IDisposable
                     return await HandleDirectedMessage(nodeContext, dm, thumbprintSignatureCache, cancellationToken);
                 case Any any when any.Is(ForwardedMessage.Descriptor):
                     nodeContext.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Forwarded message payload is another forwarded message.  Discarding.", ShortName, RemoteEndPoint);
-                    Client.Close();
+                    Client?.Close();
                     return true;
                 default:
                     // This is the normal case, it's a forwarded message of some other type.
@@ -289,12 +314,12 @@ internal class Peer : IDisposable
         nodeContext.Logger?.LogDebug("DM RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): {PayloadType}", ShortName, RemoteEndPoint, dm.Payload.TypeUrl);
         //MessageUtils.Dump(dm, nodeContext.Logger);
 
-        var isSenderVerifiable = thumbprintSignatureCache.TryGetValue(DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey);
+        var isSenderVerifiable = thumbprintSignatureCache.TryGetValue(DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey) || IsLoopback;
         var dm_payload = dm.Payload.ToByteArray();
-        var isSignatureValid = isSenderVerifiable && CryptoUtils.ValidateDilithiumSignature(sourceIdentityPublicKey, dm_payload, dm.Signature.ToByteArray());
+        var isSignatureValid = IsLoopback || (isSenderVerifiable && CryptoUtils.ValidateDilithiumSignature(sourceIdentityPublicKey, dm_payload, dm.Signature.ToByteArray()));
 
         // Is this destined for me?
-        if (!Enumerable.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint, dm.DstIdentityThumbprint))
+        if (!IsLoopback && !Enumerable.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint, dm.DstIdentityThumbprint))
         {
             // It is NOT destined for me.  But can I be useful and verify the signature so I do not forward corruption?
             if (isSenderVerifiable && !isSignatureValid)
@@ -335,7 +360,7 @@ internal class Peer : IDisposable
             return false;
         }
 
-        ImmutableArray<byte> srcThumbprint = [..dm.SrcIdentityThumbprint.ToByteArray()];
+        ImmutableArray<byte> srcThumbprint = [.. dm.SrcIdentityThumbprint.ToByteArray()];
         return await HandleMessage(nodeContext, srcThumbprint, dm.Payload, cancellationToken);
     }
     #endregion 
@@ -350,7 +375,7 @@ internal class Peer : IDisposable
         State = PeerState.SYN_RECEIVED;
 
         // We expect a Syn (with a public key).  Calculate the Kyber cipher text and send back an Ack.
-        var stream = Client.GetStream();
+        var stream = Stream!;
         if (!stream.CanRead || !stream.CanWrite)
             return false;
 
@@ -365,7 +390,7 @@ internal class Peer : IDisposable
         catch (EndOfStreamException ex)
         {
             nodeContext.Logger?.LogWarning(ex, "End of stream from peer {RemoteEndPoint} before Syn could be processed. Closing.", RemoteEndPoint);
-            Client.Close();
+            Client?.Close();
             return false;
         }
 
@@ -377,16 +402,17 @@ internal class Peer : IDisposable
         catch (InvalidProtocolBufferException ex)
         {
             nodeContext.Logger?.LogError(ex, "Invalid Syn from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
-            Client.Close();
+            Client?.Close();
             return false;
         }
 
-        if (SessionSharedKey != null) {
+        if (SessionSharedKey != null)
+        {
             nodeContext.Logger?.LogError("Session shared key already calculated processing Syn from {RemoteEndPoint}! Closing.", RemoteEndPoint);
-            Client.Close();
-            return false;            
+            Client?.Close();
+            return false;
         }
-        var (encapsulatedKey, sessionSharedKey) = CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey([.. syn.SessionPubKey.ToByteArray()]);
+        var (encapsulatedKey, sessionSharedKey) = CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey([.. syn.SessionPubKey.ToByteArray()], nodeContext.Logger);
         SessionSharedKey = sessionSharedKey;
 
         // This peer's identity key was received in Syn.
@@ -428,7 +454,7 @@ internal class Peer : IDisposable
             throw new InvalidOperationException($"Peer {ShortName} already has an identity public key by the time this Ack was recieved.");
 
         // We expect a Ack (with a cipher text).  Calculate the shared key and send back an encrypted SynAck.
-        var stream = Client.GetStream();
+        var stream = Stream!;
         if (!stream.CanRead || !stream.CanWrite)
             return false;
 
@@ -443,7 +469,7 @@ internal class Peer : IDisposable
         catch (EndOfStreamException ex)
         {
             nodeContext.Logger?.LogWarning(ex, "End of stream from peer {RemoteEndPoint} before Ack could be processed. Closing.", RemoteEndPoint);
-            Client.Close();
+            Client?.Close();
             return false;
         }
 
@@ -454,13 +480,13 @@ internal class Peer : IDisposable
             if (ack.CipherText == null || ack.CipherText.Length != 1568)
             {
                 nodeContext.Logger?.LogError("Invalid Ack (CipherText) from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
-                Client.Close();
+                Client?.Close();
                 return false;
             }
             if (ack.IdPubKey == null || ack.IdPubKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
             {
                 nodeContext.Logger?.LogError("Invalid Ack (IdPubKey) from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
-                Client.Close();
+                Client?.Close();
                 return false;
             }
 
@@ -468,7 +494,7 @@ internal class Peer : IDisposable
         catch (InvalidProtocolBufferException ex)
         {
             nodeContext.Logger?.LogError(ex, "Invalid Ack from {RemoteEndPoint} could not be parsed. Closing.", RemoteEndPoint);
-            Client.Close();
+            Client?.Close();
             return false;
         }
 
@@ -477,7 +503,7 @@ internal class Peer : IDisposable
             throw new InvalidOperationException("Shared key already computed!");
         if (SessionPrivateKey == null)
             throw new InvalidOperationException("Private key not set!");
-        SessionSharedKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. ack.CipherText.ToByteArray()]);
+        SessionSharedKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. ack.CipherText.ToByteArray()], nodeContext.Logger);
         if (IdentityPublicKey != null)
             throw new InvalidOperationException($"Peer {Name} should have an empty identity public key field at Ack time!");
 
@@ -489,6 +515,7 @@ internal class Peer : IDisposable
         State = PeerState.ESTABLISHED;
 
         //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
+        nodeContext.Logger?.LogDebug("Recieved Ack from peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
         return true;
     }
 
@@ -515,10 +542,6 @@ internal class Peer : IDisposable
                     await nodeContext.WriteLineToUserAsync($"DESTINATION UNREACHABLE FOR {DisplayUtils.BytesToHex(err.UnreachableIdentityThumbprint)} VIA {ShortName}", cancellationToken);
                     return true;
                 }
-            //case Any any when any.Is(Ping.Descriptor):
-            //    return await HandlePing(nodeContext, verifiedSourceIdentityPubKey, any.Unpack<Ping>(), cancellationToken);
-            //case Any any when any.Is(Pong.Descriptor):
-            //    return await HandlePong(nodeContext, any.Unpack<Pong>(), cancellationToken);
             default:
                 var requestContext = new RequestContext
                 {
@@ -540,7 +563,7 @@ internal class Peer : IDisposable
     public void CloseInternal()
     {
         State = PeerState.CLOSING;
-        Client.Close();
+        Client?.Close();
         State = PeerState.CLOSED;
     }
 
@@ -610,13 +633,13 @@ internal class Peer : IDisposable
         if (envelope_payload_bytes == null || envelope_payload_bytes.Length == 0)
             throw new ArgumentException("Could not serialize envelope payload to byte array");
 
-        if (SessionSharedKey == null || SessionSharedKey.Value.Length == 0)
+        if (!IsLoopback && (SessionSharedKey == null || SessionSharedKey.Value.Length == 0))
         {
             logger?.LogError("Session key is not established with peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
             throw new InvalidOperationException($"Session key is not established with peer {ShortName} ({RemoteEndPoint})");
         }
 
-        return CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, SessionSharedKey.Value, logger);
+        return CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, SessionSharedKey, logger);
     }
 
     public async Task SendSyn(NodeContext nodeContext, CancellationToken cancellationToken)
@@ -636,7 +659,7 @@ internal class Peer : IDisposable
         };
 
         var bytes_to_send = message.ToByteArray();
-        await Client.GetStream().WriteAsync(bytes_to_send, cancellationToken);
+        await Stream!.WriteAsync(bytes_to_send, cancellationToken);
         BytesSent += (ulong)bytes_to_send.Length;
         LastActivity = DateTimeOffset.Now;
 
@@ -650,16 +673,16 @@ internal class Peer : IDisposable
         var bytes_to_send = envelope.ToByteArray();
         try
         {
-            await Client.GetStream().WriteAsync(bytes_to_send, cancellationToken);
+            await Stream!.WriteAsync(bytes_to_send, cancellationToken);
             BytesSent += (ulong)bytes_to_send.Length;
-            //logger?.LogTrace("SendEnvelope sent {BytesSent} bytes", bytes_to_send.Length);
+            logger?.LogTrace("SendEnvelope sent {BytesSent} bytes", bytes_to_send.Length);
             LastActivity = DateTimeOffset.Now;
             return true;
         }
         catch (Exception ex)
         {
             logger?.LogError(ex, "Unable to write envelope bytes. Closing.");
-            Client.Close();
+            Client?.Close();
             return false;
         }
     }

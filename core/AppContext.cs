@@ -86,6 +86,10 @@ public class AppContext : IAppContext
         if (ultimateDestinationThumbprint.Length != Constants.THUMBPRINT_LEN)
             throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {ultimateDestinationThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
+        if (routingPeerThumbprint.All(b => b == 0x00) &&
+            ultimateDestinationThumbprint.Any(b => b != 0x00))
+            return false; // We do not allow routed messages to loopback ultimately destined for anything other than loopback
+
         var routingPeer = FindPeerByThumbprint(routingPeerThumbprint) ?? throw new ArgumentOutOfRangeException(nameof(routingPeerThumbprint), $"Unable to find source-routed peer {routingPeerThumbprint} by its thumbprint");
         var msg = Node.PrepareEnvelopePayload(routingPeerThumbprint, ultimateDestinationThumbprint, message);
         bool success = msg != null;
@@ -100,10 +104,10 @@ public class AppContext : IAppContext
 
     public (ImmutableArray<byte> publicKeyBytes, ImmutableArray<byte> privateKeyBytes) GenerateKyberKeyPair() => CryptoUtils.GenerateKyberKeyPair(Logger);
 
-    public (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey) => CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(publicKey);
+    public (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey, ILogger? logger) => CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(publicKey, logger);
 
-    public ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey) =>
-        CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey);
+    public ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey, ILogger? logger) =>
+        CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey, logger);
 
     public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class
     {
@@ -122,6 +126,10 @@ public class AppContext : IAppContext
             throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
         if (publicKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
             throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Public key should be {Constants.KYBER_PUBLIC_KEY_LEN} bytes long but was {publicKey.Length} bytes.");
+
+        // Don't add loopback
+        if (thumbprint.All(b => b == 0x00))
+            return false;
 
         return Node.TryAddThumbprintSignatureCache(thumbprint, publicKey);
     }

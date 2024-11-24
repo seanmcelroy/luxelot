@@ -28,7 +28,7 @@ public class FileClientApp : IClientApp
 
     public string Name => "Fserve Client";
 
-    public string InteractiveCommand => "fs";
+    public string? InteractiveCommand => "fs";
 
     public void OnInitialize(IAppContext appContext)
     {
@@ -54,7 +54,7 @@ public class FileClientApp : IClientApp
             appContext.Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
         }
 
-        Reset();
+        Reset(false);
     }
 
     public async Task OnActivate(CancellationToken cancellationToken)
@@ -62,18 +62,26 @@ public class FileClientApp : IClientApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        await appContext.SendConsoleMessage("fserve client 0.0.1", cancellationToken);
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        await appContext.SendConsoleMessage($"{Name} {version}", cancellationToken);
     }
 
-    public void Reset()
+    private void Reset(bool generateKeypair)
     {
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
         ServerThumbprint = null;
-        var (publicKeyBytes, privateKeyBytes) = appContext.GenerateKyberKeyPair();
-        SessionPublicKey = publicKeyBytes;
-        SessionPrivateKey = privateKeyBytes;
+        if (generateKeypair) // Avoid expensive keygen at initialize, b/c this may not be used.
+        {
+            var (publicKeyBytes, privateKeyBytes) = appContext.GenerateKyberKeyPair();
+            SessionPublicKey = publicKeyBytes;
+            SessionPrivateKey = privateKeyBytes;
+        }
+        else {
+            SessionPublicKey = null;
+            SessionPrivateKey = null;
+        }
         SessionSharedKey = null;// Computed after AuthChannelResponse received
     }
 
@@ -94,7 +102,7 @@ public class FileClientApp : IClientApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        Reset();
+        Reset(true);
 
         ServerThumbprint = destinationThumbprint;
         Principal = Encoding.UTF8.GetBytes(username).ToImmutableArray();
@@ -180,7 +188,7 @@ public class FileClientApp : IClientApp
             throw new InvalidOperationException("Shared key already computed!");
         if (SessionPrivateKey == null)
             throw new InvalidOperationException("Private key not set!");
-        SessionSharedKey = appContext.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. acr.CipherText]);
+        SessionSharedKey = appContext.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. acr.CipherText], appContext.Logger);
 
         //appContext.Logger?.LogCritical("CLIENT FSERV SESSION KEY: {SessionSharedKey}", DisplayUtils.BytesToHex(SessionSharedKey));
         appContext.Logger?.LogInformation("FSERVE AuthChannelResponse received from {SourceThumbprint}. Session shared key established.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));

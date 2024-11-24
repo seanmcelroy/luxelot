@@ -10,6 +10,12 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <AssemblyVersion>1.1.*</AssemblyVersion>
+    <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
+    <Deterministic>false</Deterministic>
+  </PropertyGroup>
+
   <Target Name="CopyDLLs" AfterTargets="Build">
     <Message Text="Copying PingApp build outputs" Importance="High" />
 

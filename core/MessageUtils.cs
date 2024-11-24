@@ -57,6 +57,8 @@ public static class MessageUtils
             return false;
         if (fwd.DstIdentityThumbprint == null || fwd.DstIdentityThumbprint.Length != Constants.THUMBPRINT_LEN)
             return false;
+        if (fwd.DstIdentityThumbprint.All(b => b == 0x00))
+            return false; // We do not accept forwarded messages destined for loopback
         if (fwd.Signature == null || fwd.Signature.Length != Constants.DILITHIUM_SIG_LEN)
             return false;
 

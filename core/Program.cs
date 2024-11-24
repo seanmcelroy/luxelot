@@ -63,10 +63,12 @@ internal class Program
         var noKeyContainerEncryption = config.GetValue("NoKeyContainerEncryption", false);
         var noPassword = config.GetValue("NoPassword", false);
 
-        if (noKeyContainerEncryption) {
+        if (noKeyContainerEncryption)
+        {
             logger.LogCritical("Setting NoKeyContainerEncryption=true used.  This means your identity keys are not encrypted.  This should only be used in a dev mode when you need to quickly restart the process repeatedly.");
         }
-        else if (noPassword) {
+        else if (noPassword)
+        {
             logger.LogCritical("Setting NoPassword=true used.  This means your identity keys are encrypted with a static password.  This should only be used in a headless when you need to quickly start the process without user input.");
         }
 
@@ -134,10 +136,13 @@ internal class Program
                                );
                                 if (newNode == null)
                                     await Console.Error.WriteLineAsync($"Incorrect password or other error creating the new from the key store file {keyContainerFile}");
-                            } while (newNode == null);
+                            } while (newNode == null && !cts.IsCancellationRequested);
 
-                            logger.LogInformation("Loaded node '{NodeShortName}' from key container file: '{File}'", newNode.Name, keyContainerFile);
-                            nodes.Add(newNode);
+                            if (newNode != null)
+                            {
+                                logger.LogInformation("Loaded node '{NodeShortName}' from key container file: '{File}'", newNode.Name, keyContainerFile);
+                                nodes.Add(newNode);
+                            }
                             break;
                         }
                     default:
