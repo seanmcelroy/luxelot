@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using Google.Protobuf;
-using Luxelot.App.Common.Messages;
+using Luxelot.Apps.Common.DHT;
+using Luxelot.Apps.Common.Messages;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.Common;
@@ -39,7 +41,11 @@ public interface IAppContext
 
     public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class;
 
-    public bool TryAddThumbprintSignatureCache(ImmutableArray<byte> thumbprint, ImmutableArray<byte> publicKey);
+    public bool TryAddDhtEntry(ImmutableArray<byte> key, IBucketEntryValue value);
 
-    public bool TryGetSingleton<T>(out T? value) where T : class;
+    public bool TryGetSingleton<T>([NotNullWhen(true)] out T? value) where T : class;
+
+    public Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken);
+
+    public Task<bool> ExitAppInteractiveMode(string clientAppName, CancellationToken cancellationToken);
 }

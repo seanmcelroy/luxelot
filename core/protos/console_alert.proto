@@ -1,7 +1,0 @@
-syntax = "proto3";
-
-option csharp_namespace = "Luxelot.Messages";
-
-message ConsoleAlert {
-    string message = 1;
-}

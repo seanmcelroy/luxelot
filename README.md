@@ -26,9 +26,9 @@ Luxelot has the concept of loadable modules, called "apps" which either provide 
 
 ### Cryptography
 
-Nodes generate an identity in the form of a CRYSTALS Dilithium public key which is presented when handshaking with other peers and subsequently used to sign messages for forwarding around the network.  Nodes refer to network locations by the SHA-256 hash of their Dilithium public keys.
+Nodes generate an identity in the form of a CRYSTALS-Dilithium public key which is presented when handshaking with other peers and subsequently used to sign messages for forwarding around the network.  Nodes refer to network locations by the SHA-256 hash of their Dilithium public keys.
 
-Peers establish shared secrets using the CRYSTALS Kyber Key Encapsulation Mechanism (KEM).  Kyber is used only between neighboring peers to envelop messages for trading among peers.  Each p2p connection uses its own shared secret that has a lifetime only as long as that network connection between those two peers.
+Peers establish shared secrets using the CRYSTALS-Kyber Key Encapsulation Mechanism (KEM).  Kyber is used only between neighboring peers to envelop messages for trading among peers.  Each p2p connection uses its own shared secret that has a lifetime only as long as that network connection between those two peers.
 
 Messages directly shared between neighboring nodes and those forwarded across the network between remote nodes are signed by the Dilithum key of the sender.  While forwarded messages are not E2EE encrypted, Apps can define their own key exchange messages and implement E2EE as a feature of their app protocol design on top of Luxelot.  (The in-development file server app does this.)
 
@@ -110,7 +110,7 @@ This example creates two listening nodes and informs Alice of Bob so that she ca
 
 The `KeyContainer` parameter is the file into which to save the cryptographic key material for the node.  This file is saved into AppData/luxelot/{KeyContainer}.{RandomExtension}, which on Linux is the ~/.config/luxelot path.  The extension contains data (an IV/salt) used to decrypt the file's contents and must not be changed on the file system or else decryption will fail.  In this example, node "bob" does not specify a key container, and so that node's key material will be recreated on every program run.
 
-The `NoPassword` option sets the password to the literal value "insecure", which can be used to run luxelot headless or without an external terminal when debugging in vscode/vscodium.
+The `NoPassword` option sets the password to the literal value "insecure", which can be used to run luxelot headless or without an external terminal when debugging in vscode/vscodium.  There is also a `NoKeyContainerEncryption` option which does not set a password at all.  This is only useful for a Luxelot developer to forego the password hashing time for decrypting key containers in iterative development processes.  Please do not set this in production.
 
 ## FAQs
 

@@ -1,14 +1,14 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
-using Luxelot.App.Common.Messages;
+using Luxelot.Apps.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
+using Luxelot.Apps.Common.DHT;
 
 namespace Luxelot;
 
@@ -25,6 +25,7 @@ internal class Peer : IDisposable
     private ImmutableArray<byte>? SessionPrivateKey { get; init; }
     public ImmutableArray<byte>? SessionSharedKey { get; private set; }
     private TcpClient? Client { get; init; }
+    public IPAddress? ClientPerceivedLocalAddress { get; private set; }
 
     // State
     public PeerState State { get; private set; } = PeerState.CLOSED;
@@ -36,8 +37,8 @@ internal class Peer : IDisposable
     public ulong BytesReceived { get; private set; } = 0;
     public ulong BytesSent { get; private set; } = 0;
 
-    public EndPoint? LocalEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client?.Client?.LocalEndPoint;
-    public EndPoint? RemoteEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : Client?.Client?.RemoteEndPoint;
+    public IPEndPoint? LocalEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : (IPEndPoint?)Client?.Client?.LocalEndPoint;
+    public IPEndPoint? RemoteEndPoint => disposed ? throw new ObjectDisposedException(nameof(Client)) : (IPEndPoint?)Client?.Client?.RemoteEndPoint;
     public bool IsReadable => !disposed && (IsLoopback || (Client!.Connected && Client.GetStream().CanRead));
     public bool IsWriteable => !disposed && (IsLoopback || (Client!.Connected && Client.GetStream().CanWrite));
 
@@ -48,13 +49,15 @@ internal class Peer : IDisposable
         LoopbackStream = new LoopbackStream(logger);
         State = PeerState.ESTABLISHED;
 
-        IdentityPublicKeyThumbprint = new byte[Constants.THUMBPRINT_LEN].ToImmutableArray();
+        IdentityPublicKeyThumbprint = new byte[Apps.Common.Constants.THUMBPRINT_LEN].ToImmutableArray();
         Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
         ShortName = $"{Name[..8]}";
     }
 
     private Peer(TcpClient tcpClient)
     {
+        ArgumentNullException.ThrowIfNull(tcpClient);
+        
         Client = tcpClient;
     }
 
@@ -67,6 +70,7 @@ internal class Peer : IDisposable
             SessionPublicKey = null,
             SessionPrivateKey = null,
             SessionSharedKey = null, // Computed after Syn received
+            State = PeerState.START,
         };
         return peer;
     }
@@ -91,17 +95,18 @@ internal class Peer : IDisposable
         {
             SessionPublicKey = publicKeyBytes,
             SessionPrivateKey = privateKeyBytes,
-            SessionSharedKey = null // Computed after Ack received
+            SessionSharedKey = null, // Computed after Ack received
+            State = PeerState.START,
         };
         return peer;
     }
 
     internal async Task<bool> HandleInputAsync(
         NodeContext nodeContext,
-        ConcurrentDictionary<string, ImmutableArray<byte>> thumbprintSignatureCache,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(thumbprintSignatureCache);
+        ArgumentNullException.ThrowIfNull(nodeContext);
+
         if (!IsLoopback)
             ObjectDisposedException.ThrowIf(disposed, Client!);
 
@@ -248,7 +253,7 @@ internal class Peer : IDisposable
                     return HandleErrorMessage(nodeContext, err);
                 case Any any when any.Is(DirectedMessage.Descriptor):
                     var dm = any.Unpack<DirectedMessage>();
-                    return await HandleDirectedMessage(nodeContext, dm, thumbprintSignatureCache, cancellationToken);
+                    return await HandleDirectedMessage(nodeContext, dm, cancellationToken);
                 case Any any when any.Is(ForwardedMessage.Descriptor):
                     nodeContext.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Forwarded message payload is another forwarded message.  Discarding.", ShortName, RemoteEndPoint);
                     Client?.Close();
@@ -264,11 +269,14 @@ internal class Peer : IDisposable
 
                     // If we are aware of the public key of the origin, then validate the forwarded message.
                     ImmutableArray<byte> fwd_origin_pub_thumbprint = [.. fwd.SrcIdentityThumbprint];
-                    var cacheKey = DisplayUtils.BytesToHex(fwd_origin_pub_thumbprint);
-                    if (thumbprintSignatureCache.TryGetValue(cacheKey, out ImmutableArray<byte> fwd_origin_pub_key))
+
+                    if (nodeContext.TryGetDhtEntry([.. fwd_origin_pub_thumbprint], out IBucketEntryValue? fwd_origin_node)
+                        && fwd_origin_node is NodeEntry fwd_node
+                        && fwd_node.IdentityPublicKey != null)
                     {
+
                         var fwd_payload = fwd.Payload.ToByteArray();
-                        var isSignatureValid = CryptoUtils.ValidateDilithiumSignature(fwd_origin_pub_key, fwd_payload, fwd.Signature.ToByteArray());
+                        var isSignatureValid = CryptoUtils.ValidateDilithiumSignature(fwd_node.IdentityPublicKey.Value, fwd_payload, fwd.Signature.ToByteArray());
                         if (!isSignatureValid)
                         {
                             nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
@@ -286,7 +294,7 @@ internal class Peer : IDisposable
         {
             var dm = envelopePayload.DirectedMessage;
             // We could decrypt, so we are established.
-            return await HandleDirectedMessage(nodeContext, dm, thumbprintSignatureCache, cancellationToken);
+            return await HandleDirectedMessage(nodeContext, dm, cancellationToken);
         }
         else
         {
@@ -307,16 +315,21 @@ internal class Peer : IDisposable
     private async Task<bool> HandleDirectedMessage(
         NodeContext nodeContext,
         DirectedMessage dm,
-        ConcurrentDictionary<string,
-        ImmutableArray<byte>> thumbprintSignatureCache,
         CancellationToken cancellationToken)
     {
         nodeContext.Logger?.LogDebug("DM RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): {PayloadType}", ShortName, RemoteEndPoint, dm.Payload.TypeUrl);
         //MessageUtils.Dump(dm, nodeContext.Logger);
 
-        var isSenderVerifiable = thumbprintSignatureCache.TryGetValue(DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint), out ImmutableArray<byte> sourceIdentityPublicKey) || IsLoopback;
+        ImmutableArray<byte> srcThumbprintBytes = [.. dm.SrcIdentityThumbprint.ToByteArray()];
+        var isSenderVerifiable =
+            (
+                    nodeContext.TryGetDhtEntry(srcThumbprintBytes, out IBucketEntryValue? sourceNode)
+                    && (sourceNode is NodeEntry srcNode)
+                    && srcNode.IdentityPublicKey != null
+            )
+            || IsLoopback;
         var dm_payload = dm.Payload.ToByteArray();
-        var isSignatureValid = IsLoopback || (isSenderVerifiable && CryptoUtils.ValidateDilithiumSignature(sourceIdentityPublicKey, dm_payload, dm.Signature.ToByteArray()));
+        var isSignatureValid = IsLoopback || (isSenderVerifiable && CryptoUtils.ValidateDilithiumSignature(((NodeEntry)sourceNode!).IdentityPublicKey!.Value, dm_payload, dm.Signature.ToByteArray()));
 
         // Is this destined for me?
         if (!IsLoopback && !Enumerable.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint, dm.DstIdentityThumbprint))
@@ -350,11 +363,11 @@ internal class Peer : IDisposable
         // Is the signature verifiable?
         if (!isSenderVerifiable)
         {
-            nodeContext.Logger?.LogError("Discarding message signed with unknown signature purportedly from {SourceThumbprint} intended for me.", DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint));
-            return false;
+            nodeContext.Logger?.LogTrace("Message signed with unknown signature purportedly from {SourceThumbprint} intended for me.  Allowing.", DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint));
+            //return false;
         }
 
-        if (!isSignatureValid)
+        if (isSenderVerifiable && !isSignatureValid)
         {
             nodeContext.Logger?.LogError("Discarding message with invalid signature from {SourceThumbprint} intended for me.", DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint));
             return false;
@@ -429,12 +442,25 @@ internal class Peer : IDisposable
         //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, DisplayUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
         nodeContext.Logger?.LogDebug("Sending Ack to peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
 
+        byte[] addrBytes = new byte[16];
+        if (RemoteEndPoint == null || !RemoteEndPoint.Address.MapToIPv6().TryWriteBytes(addrBytes, out int bytesWritten))
+        {
+            nodeContext.Logger?.LogWarning("Cannot write IP address bytes for peer {PeerShortName}", ShortName);
+            Client?.Close();
+            return false;
+        }
+
+        var addrs = NetUtils.ConvertIPAddressToMessageIntegers(RemoteEndPoint.Address) ?? throw new InvalidOperationException();
         var message = new Ack
         {
             ProtVer = Node.NODE_PROTOCOL_VERSION,
             CipherText = ByteString.CopyFrom(encapsulatedKey),
             // Now provide our own identity key in the response Ack
             IdPubKey = ByteString.CopyFrom([.. nodeContext.NodeIdentityKeyPublicBytes]),
+            Addr1 = addrs[0],
+            Addr2 = addrs[1],
+            Addr3 = addrs[2],
+            Addr4 = addrs[3],
         };
 
         var bytes_to_send = message.ToByteArray();
@@ -458,11 +484,12 @@ internal class Peer : IDisposable
         if (!stream.CanRead || !stream.CanWrite)
             return false;
 
-        int size = 4168; // Special case since we know exactly field sizes for Ack.
+        int size = 4178; // Special case since we know exactly field sizes for Ack.
         var buffer = new byte[size];
         try
         {
             await stream.ReadExactlyAsync(buffer, 0, size, cancellationToken: cancellationToken);
+            //var size2 = await stream.ReadAsync(buffer, cancellationToken: cancellationToken);
             BytesReceived += (ulong)size;
             LastActivity = DateTimeOffset.Now;
         }
@@ -514,10 +541,24 @@ internal class Peer : IDisposable
         ShortName = $"{Name[..8]}";
         State = PeerState.ESTABLISHED;
 
+        // Remember what this peer perceives my IP address as
+        ClientPerceivedLocalAddress = NetUtils.ConvertMessageIntegersToIPAddress(ack.Addr1, ack.Addr2, ack.Addr3, ack.Addr4);
+
         //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
-        nodeContext.Logger?.LogDebug("Recieved Ack from peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
+        nodeContext.Logger?.LogDebug("Recieved Ack from peer {PeerShortName} ({RemoteEndPoint}).  Peer perceives this node at {LocalAddress}", ShortName, RemoteEndPoint, ClientPerceivedLocalAddress);
         return true;
     }
+
+    internal void HandleSynAck(NodeContext nodeContext, SynAck synAck, CancellationToken cancellationToken)
+    {
+        using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleSynAck)} from {RemoteEndPoint}");
+        State = PeerState.ESTABLISHED;
+
+        // Remember what this peer perceives my IP address as
+        ClientPerceivedLocalAddress = NetUtils.ConvertMessageIntegersToIPAddress(synAck.Addr1, synAck.Addr2, synAck.Addr3, synAck.Addr4);
+        nodeContext.Logger?.LogDebug("Recieved SynAck from peer {PeerShortName} ({RemoteEndPoint}).  Peer perceives this node at {LocalAddress}", ShortName, RemoteEndPoint, ClientPerceivedLocalAddress);
+    }
+
 
     internal async Task<bool> HandleMessage(NodeContext nodeContext, ImmutableArray<byte> sourceThumbprint, Any message, CancellationToken cancellationToken)
     {
@@ -528,12 +569,13 @@ internal class Peer : IDisposable
         ArgumentNullException.ThrowIfNull(message);
 
         if (sourceThumbprint.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(sourceThumbprint), $"Source thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {sourceThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+            throw new ArgumentOutOfRangeException(nameof(sourceThumbprint), $"Source thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {sourceThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         switch (message)
         {
-            case Any any when any.Is(ConsoleAlert.Descriptor):
-                nodeContext.Logger?.LogCritical("CONSOLE ALERT from {PeerShortName} ({RemoteEndPoint}): {Contents}", ShortName, RemoteEndPoint, any.Unpack<ConsoleAlert>().Message);
+            case Any any when any.Is(SynAck.Descriptor):
+                    var synack = any.Unpack<SynAck>();
+                HandleSynAck(nodeContext, synack, cancellationToken);
                 return true;
             case Any any when any.Is(ErrorDestinationUnreachable.Descriptor):
                 {

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 option csharp_namespace = "Luxelot.Apps.FserveApp.Messages";
 
-message ChangeDirectoryRequest
+message ChangeDirectory
  {
     string directory = 1;
 }

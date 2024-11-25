@@ -9,7 +9,7 @@ using pb = global::Google.Protobuf;
 using pbc = global::Google.Protobuf.Collections;
 using pbr = global::Google.Protobuf.Reflection;
 using scg = global::System.Collections.Generic;
-namespace Luxelot.App.Common.Messages {
+namespace Luxelot.Apps.Common.Messages {
 
   /// <summary>Holder for reflection information generated from envelope.proto</summary>
   public static partial class EnvelopeReflection {
@@ -31,7 +31,7 @@ namespace Luxelot.App.Common.Messages {
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.App.Common.Messages.Envelope), global::Luxelot.App.Common.Messages.Envelope.Parser, new[]{ "Nonce", "Ciphertext", "Tag", "AssociatedData" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.Common.Messages.Envelope), global::Luxelot.Apps.Common.Messages.Envelope.Parser, new[]{ "Nonce", "Ciphertext", "Tag", "AssociatedData" }, null, null, null, null)
           }));
     }
     #endregion
@@ -52,7 +52,7 @@ namespace Luxelot.App.Common.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Luxelot.App.Common.Messages.EnvelopeReflection.Descriptor.MessageTypes[0]; }
+      get { return global::Luxelot.Apps.Common.Messages.EnvelopeReflection.Descriptor.MessageTypes[0]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]

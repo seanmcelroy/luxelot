@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Google.Protobuf;
-using Luxelot.App.Common.Messages;
+using Luxelot.Apps.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics.CodeAnalysis;
+using Luxelot.Apps.Common.DHT;
 
 namespace Luxelot;
 
@@ -34,8 +36,8 @@ public class AppContext : IAppContext
         ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(message);
 
-        if (ultimateDestinationThumbprint.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {ultimateDestinationThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (ultimateDestinationThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {ultimateDestinationThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         var msg = Node.PrepareEnvelopePayload(null, ultimateDestinationThumbprint, message);
         bool success = msg != null;
@@ -80,11 +82,11 @@ public class AppContext : IAppContext
         ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(message);
 
-        if (routingPeerThumbprint.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(routingPeerThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {routingPeerThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (routingPeerThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(routingPeerThumbprint), $"Thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {routingPeerThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
-        if (ultimateDestinationThumbprint.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {ultimateDestinationThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (ultimateDestinationThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {ultimateDestinationThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         if (routingPeerThumbprint.All(b => b == 0x00) &&
             ultimateDestinationThumbprint.Any(b => b != 0x00))
@@ -118,23 +120,19 @@ public class AppContext : IAppContext
         return Singletons.TryAdd(typeof(T), value);
     }
 
-    public bool TryAddThumbprintSignatureCache(ImmutableArray<byte> thumbprint, ImmutableArray<byte> publicKey) {
-        ArgumentNullException.ThrowIfNull(thumbprint);
-        ArgumentNullException.ThrowIfNull(publicKey);
-
-        if (thumbprint.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
-        if (publicKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
-            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Public key should be {Constants.KYBER_PUBLIC_KEY_LEN} bytes long but was {publicKey.Length} bytes.");
+    public bool TryAddDhtEntry(ImmutableArray<byte> key, IBucketEntryValue value)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(value);
 
         // Don't add loopback
-        if (thumbprint.All(b => b == 0x00))
+        if (key.All(b => b == 0x00))
             return false;
 
-        return Node.TryAddThumbprintSignatureCache(thumbprint, publicKey);
+        return Node.TryAddDhtEntry(key, value);
     }
 
-    public bool TryGetSingleton<T>(out T? value) where T : class
+    public bool TryGetSingleton<T>([NotNullWhen(true)] out T? value) where T : class
     {
         var success = Singletons.TryGetValue(typeof(T), out object? v);
         if (v == null)
@@ -155,10 +153,15 @@ public class AppContext : IAppContext
         return CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, sessionSharedKey, logger);
     }
 
-    public byte[]? DecryptEnvelope(Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger) {
+    public byte[]? DecryptEnvelope(Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger)
+    {
         ArgumentNullException.ThrowIfNull(envelope);
         ArgumentNullException.ThrowIfNull(sessionSharedKey);
 
         return CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
     }
+
+    public async Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken) => await Node.EnterAppInteractiveMode(clientAppName, cancellationToken);
+
+    public async Task<bool> ExitAppInteractiveMode(string clientAppName, CancellationToken cancellationToken) => await Node.ExitAppInteractiveMode(clientAppName, cancellationToken);
 }

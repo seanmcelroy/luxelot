@@ -6,4 +6,8 @@ message Ack {
     uint32 prot_ver = 1;
     bytes cipher_text = 2;
     bytes id_pub_key = 3;
+    fixed32 addr1 = 4;
+    fixed32 addr2 = 5;
+    fixed32 addr3 = 6;
+    fixed32 addr4 = 7;
 }

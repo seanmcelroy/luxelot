@@ -7,7 +7,17 @@ public class ChangeDirectoryCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string Command => "fscd";
+    public string FullCommand => "fscd";
+
+    public string InteractiveCommand => "cd";
+
+    public string[] InteractiveAliases => ["chdir"];
+
+    public string ShortHelp => "Changes the current directory to the one specified";
+
+    public string Usage => "cd <DIRECTORY>";
+
+    public string Example => "cd /";
 
     public void OnInitialize(IAppContext appContext)
     {
@@ -22,7 +32,7 @@ public class ChangeDirectoryCommand : IConsoleCommand
 
         if (words.Length != 2)
         {
-            await appContext.SendConsoleMessage($"FSCD command requires one argument, the directory to select.", cancellationToken);
+            await appContext.SendConsoleMessage($"Command requires one argument, the directory to select.", cancellationToken);
             return false;
         }
 
@@ -35,7 +45,7 @@ public class ChangeDirectoryCommand : IConsoleCommand
             await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
             return false;
         }
-        
+
         return await fileClientApp.SendChangeDirectoryRequest(directory, cancellationToken);
     }
 }

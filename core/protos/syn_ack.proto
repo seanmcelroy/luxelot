@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Messages";
+
+message SynAck {
+    fixed32 addr1 = 1;
+    fixed32 addr2 = 2;
+    fixed32 addr3 = 3;
+    fixed32 addr4 = 4;
+}

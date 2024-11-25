@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using Google.Protobuf;
-using Luxelot.App.Common.Messages;
+using Luxelot.Apps.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.FserveApp.Messages;
 using Microsoft.Extensions.Logging;
@@ -21,6 +21,8 @@ public static class FrameUtils
             frameType = ServerFrameType.Status;
         else if (message is ListResponse)
             frameType = ServerFrameType.ListResponse;
+        else if (message is DownloadReady)
+            frameType = ServerFrameType.DownloadReady;
         else
         {
             appContext?.Logger?.LogError("Unknown frame type: {TypeName}", message.GetType().FullName);
@@ -49,8 +51,10 @@ public static class FrameUtils
             frameType = ClientFrameType.AuthUserResponse;
         else if (message is ListRequest)
             frameType = ClientFrameType.ListRequest;
-        else if (message is ChangeDirectoryRequest)
-            frameType = ClientFrameType.ChangeDirectoryRequest;
+        else if (message is ChangeDirectory)
+            frameType = ClientFrameType.ChangeDirectory;
+        else if (message is PrepareDownload)
+            frameType = ClientFrameType.PrepareDownload;
         else
             throw new NotImplementedException($"Unknown frame type: {message.GetType().FullName}");
 
@@ -82,7 +86,8 @@ public static class FrameUtils
             ClientFrameType.AuthUserBegin => AuthUserBegin.Parser.ParseFrom(decrypted),
             ClientFrameType.AuthUserResponse => AuthUserResponse.Parser.ParseFrom(decrypted),
             ClientFrameType.ListRequest => ListRequest.Parser.ParseFrom(decrypted),
-            ClientFrameType.ChangeDirectoryRequest => ChangeDirectoryRequest.Parser.ParseFrom(decrypted),
+            ClientFrameType.ChangeDirectory => ChangeDirectory.Parser.ParseFrom(decrypted),
+            ClientFrameType.PrepareDownload => PrepareDownload.Parser.ParseFrom(decrypted),
             _ => throw new NotImplementedException($"Unknown frame type: {frame.FrameType}"),
         };
     }
@@ -105,6 +110,7 @@ public static class FrameUtils
             ServerFrameType.AuthUserChallenge => AuthUserChallenge.Parser.ParseFrom(decrypted),
             ServerFrameType.Status => Status.Parser.ParseFrom(decrypted),
             ServerFrameType.ListResponse => ListResponse.Parser.ParseFrom(decrypted),
+            ServerFrameType.DownloadReady => DownloadReady.Parser.ParseFrom(decrypted),
             _ => throw new NotImplementedException($"Unknown frame type: {frame.FrameType}"),
         };
     }

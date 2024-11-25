@@ -14,4 +14,5 @@ enum Operation {
     NONE = 0;
     AUTHENTICATION = 1;
     CD = 2;
+    PREPARE_DOWNLOAD = 3;
 }

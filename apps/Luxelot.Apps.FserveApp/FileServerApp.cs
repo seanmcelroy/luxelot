@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -42,6 +43,8 @@ public class FserveApp : IServerApp
         ArgumentNullException.ThrowIfNull(requestContext);
         ArgumentNullException.ThrowIfNull(message);
 
+        using var scope = appContext?.Logger?.BeginScope("HandleMessage");
+
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
@@ -74,8 +77,10 @@ public class FserveApp : IServerApp
                         return await HandleAuthUserBegin(requestContext, aub, cancellationToken);
                     else if (innerMessage is ListRequest lr)
                         return await HandleListRequest(requestContext, lr, cancellationToken);
-                    else if (innerMessage is ChangeDirectoryRequest cdr)
+                    else if (innerMessage is ChangeDirectory cdr)
                         return await HandleChangeDirectoryRequest(requestContext, cdr, cancellationToken);
+                    else if (innerMessage is PrepareDownload pd)
+                        return await HandlePrepareDownload(requestContext, pd, cancellationToken);
                     else
                     {
                         appContext?.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Unsupported client frame type: {FrameType}", requestContext.PeerShortName, requestContext.RemoteEndPoint, innerMessage.GetType().FullName);
@@ -92,6 +97,12 @@ public class FserveApp : IServerApp
                         return false;
                     }
 
+                    if (fileClientApp.SessionSharedKey == null)
+                    {
+                        appContext.Logger?.LogError("Unable to unwrap received server frame, no active session");
+                        return false;
+                    }
+
                     var frame = any.Unpack<ServerFrame>();
                     var innerMessage = FrameUtils.UnwrapFrame(appContext, frame, [.. fileClientApp.SessionSharedKey]);
 
@@ -101,6 +112,8 @@ public class FserveApp : IServerApp
                         return await fileClientApp.HandleStatus(requestContext, sta, cancellationToken);
                     else if (innerMessage is ListResponse lr)
                         return await fileClientApp.HandleListResponse(requestContext, lr, cancellationToken);
+                    else if (innerMessage is DownloadReady dr)
+                        return await fileClientApp.HandleDownloadReady(requestContext, dr, cancellationToken);
                     else
                     {
                         appContext?.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Unsupported server frame type {PayloadType}", requestContext.PeerShortName, requestContext.RemoteEndPoint, innerMessage.GetType().FullName);
@@ -224,9 +237,15 @@ public class FserveApp : IServerApp
 
 
         var mountsConfig = appConfig.Get<Config.MountsConfig>();
-        if (mountsConfig == null)
+        if (mountsConfig == null || mountsConfig.Mounts == null)
         {
             appContext?.Logger?.LogError("Unable to get Mounts configuration from settings.");
+            return TreeNode.EmptyRoot;
+        }
+
+        if (mountsConfig.Mounts.Count == 0)
+        {
+            appContext?.Logger?.LogError("No Mounts specified in the configuration settings.");
             return TreeNode.EmptyRoot;
         }
 
@@ -259,11 +278,9 @@ public class FserveApp : IServerApp
             if (actualPath.EndsWith(Path.DirectorySeparatorChar))
                 actualPath = actualPath[..^1];
 
-            //            else
-            //                nodes.Add(realCurrent, new TreeNode { Name = mountPoint[1..], Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
-
-
-            logicalMounts.Add(actualPath, BuildTreeNode(virtualMountPoint, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots));
+            var mountRoot = BuildTreeNode(virtualMountPoint, actualPath, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots, mountsConfig.HideEmptyDirectories);
+            if (mountRoot != null)
+                logicalMounts.Add(actualPath, mountRoot);
         }
 
         var logicalMountRoot = new TreeNode
@@ -286,12 +303,14 @@ public class FserveApp : IServerApp
         return logicalMountRoot;
     }
 
-    private static TreeNode BuildTreeNode(
+    private TreeNode? BuildTreeNode(
         string mountPoint,
         string realRoot,
+        string realParent,
         string realCurrent,
         int recursiveDepth,
-        Dictionary<string, TreeNode> virtualRoot)
+        Dictionary<string, TreeNode> virtualRoot,
+        bool hideEmptyDirectories)
     {
         ArgumentNullException.ThrowIfNull(realRoot);
         ArgumentNullException.ThrowIfNull(realCurrent);
@@ -338,13 +357,19 @@ public class FserveApp : IServerApp
             }
 
             // Subdirectories
+            var subdirCount = 0;
             if (recursiveDepth > 0)
             {
                 try
                 {
                     foreach (var subdir in Directory.GetDirectories(realCurrent))
                     {
-                        nodes.Add(subdir, BuildTreeNode(mountPoint, realRoot, subdir, recursiveDepth - 1, virtualRoot));
+                        var subdirNode = BuildTreeNode(mountPoint, realRoot, relativeDirName, subdir, recursiveDepth - 1, virtualRoot, hideEmptyDirectories);
+                        if (subdirNode != null)
+                        {
+                            subdirCount++;
+                            nodes.Add(subdir, subdirNode);
+                        }
                     }
                 }
                 catch (DirectoryNotFoundException)
@@ -354,12 +379,14 @@ public class FserveApp : IServerApp
             }
 
             // Files
+            var fileCount = 0;
             {
                 try
                 {
                     foreach (var file in Directory.GetFiles(realCurrent))
                     {
-                        var relFilePath = Path.GetRelativePath(realRoot, file);
+                        fileCount++;
+                        var relFilePath = Path.Combine(mountPoint, Path.GetRelativePath(realRoot, file));
                         var relFileName = Path.GetFileName(relFilePath);
                         var fi = new FileInfo(file);
                         var size = (uint)fi.Length;
@@ -382,16 +409,18 @@ public class FserveApp : IServerApp
                     // Swallow.  Some types of *nix files behave this way.
                 }
             }
+
+            if (subdirCount == 0 && fileCount == 0 && hideEmptyDirectories)
+                return null;
         }
         catch (UnauthorizedAccessException)
         {
             // Swallow.
         }
 
-
         var relName = (string.CompareOrdinal(relativeDirName, ".") == 0)
             ? mountPoint[1..]
-            : relativeDirName;
+            : relativeDirName[(relativeDirName.LastIndexOf('/') + 1)..]; //relativeDirName;
 
         var relMountPath = (string.CompareOrdinal(relativeDirName, ".") == 0)
             ? mountPoint
@@ -478,7 +507,7 @@ public class FserveApp : IServerApp
             cc.SessionSharedKey), cancellationToken);
     }
 
-    private async Task<bool> HandleChangeDirectoryRequest(IRequestContext requestContext, ChangeDirectoryRequest cdr, CancellationToken cancellationToken)
+    private async Task<bool> HandleChangeDirectoryRequest(IRequestContext requestContext, ChangeDirectory cdr, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(requestContext);
         ArgumentNullException.ThrowIfNull(cdr);
@@ -560,6 +589,146 @@ public class FserveApp : IServerApp
             StatusCode = 200,
             StatusMessage = cc.CurrentWorkingDirectory,
         };
+
+        return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+            appContext,
+            resp,
+            cc.SessionSharedKey), cancellationToken);
+    }
+
+    private async Task<bool> HandlePrepareDownload(IRequestContext requestContext, PrepareDownload pd, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestContext);
+        ArgumentNullException.ThrowIfNull(pd);
+
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
+        {
+            appContext.Logger?.LogDebug("PrepareDownload received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            return true;
+        }
+
+        appContext.Logger?.LogDebug("PrepareDownload from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+
+        // Build tree if it hasn't already been built.
+        logicalRootNode ??= BuildLogicalDirectoryTree();
+
+        TreeNode fileTreeNode;
+
+        if (pd.File.StartsWith('/'))
+        {
+            // Absolute
+            var fileDir = Path.GetDirectoryName(pd.File);
+            if (fileDir == null 
+                || !virtualRoots.TryGetValue(fileDir, out TreeNode? virtFolder)
+                || virtFolder.Children == null
+                || !virtFolder.Children.TryGetValue(Path.Combine(virtFolder.AbsolutePath, Path.GetFileName(pd.File)), out TreeNode? virtFile)           
+                )
+            {
+                return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                    appContext,
+                    new Status
+                    {
+                        Operation = Operation.PrepareDownload,
+                        StatusCode = 404,
+                        StatusMessage = "File not found",
+                        ResultPayload = ByteString.CopyFrom(Encoding.UTF8.GetBytes(pd.File))
+                    },
+                    cc.SessionSharedKey), cancellationToken);
+            }
+
+            fileTreeNode = virtFile;
+        }
+        else
+        {
+            if (!virtualRoots.TryGetValue(cc.CurrentWorkingDirectory, out TreeNode? virtCwd))
+            {
+                return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                    appContext,
+                    new Status
+                    {
+                        Operation = Operation.PrepareDownload,
+                        StatusCode = 404,
+                        StatusMessage = "Current working directory not found",
+                        ResultPayload = ByteString.CopyFrom(Encoding.UTF8.GetBytes(cc.CurrentWorkingDirectory))
+                    },
+                    cc.SessionSharedKey), cancellationToken);
+            }
+
+            var virtChild = virtCwd.Children?.FirstOrDefault(c => string.Compare(c.Value.RelativeName, pd.File, StringComparison.Ordinal) == 0);
+            if (virtChild == null
+                || virtChild.Equals(default(KeyValuePair<string, TreeNode>))
+                || virtChild.Value.Value.Children != null // Directory
+                )
+            {
+                return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                    appContext,
+                    new Status
+                    {
+                        Operation = Operation.PrepareDownload,
+                        StatusCode = 404,
+                        StatusMessage = "File not found",
+                        ResultPayload = ByteString.CopyFrom(Encoding.UTF8.GetBytes(pd.File))
+                    },
+                    cc.SessionSharedKey), cancellationToken);
+            }
+
+            fileTreeNode = virtChild.Value.Value;
+        }
+
+        var fi = new FileInfo(fileTreeNode.AbsolutePath);
+        var ticket = $"luxelot-fs-{requestContext.PeerShortName}-{Guid.NewGuid()}";
+
+        var tempDir = Path.GetTempPath();
+        var ticketDir = Path.Combine(tempDir, ticket);
+        var ticketDirectoryInfo = Directory.CreateDirectory(ticketDir);
+
+        // Carve up into 1MB chunks
+        using var fsFile = new FileStream(fi.FullName, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var buff = new BufferedStream(fsFile);
+        using var brFile = new BinaryReader(buff);
+        byte[] chunkBuffer = new byte[1024 * 1024];
+        var chunkDict = new Dictionary<int, (string chunkFileName, uint size, byte[] hash)>();
+        var count = 0;
+        do
+        {
+            count++;
+            var bytesRead = brFile.Read(chunkBuffer, 0, chunkBuffer.Length);
+            if (bytesRead == 0)
+                break;
+            var chunkHash = SHA256.HashData(chunkBuffer.AsSpan(0, bytesRead));
+
+            var chunkFilename = Path.GetTempFileName();
+            var relocatedChunkFilename = Path.Combine(ticketDir, Path.GetFileName(chunkFilename));
+            File.Move(chunkFilename, Path.Combine(ticketDir, chunkFilename));
+            chunkFilename = relocatedChunkFilename;
+
+            using var fsChunk = new FileStream(chunkFilename, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+            using var bwChunk = new BinaryWriter(fsChunk);
+            bwChunk.Write(chunkBuffer.AsSpan(0, bytesRead)); // No additional encryption since we're going over our E2EE.
+            chunkDict.Add(count, (chunkFilename, (uint)bytesRead, chunkHash));
+        } while (!cancellationToken.IsCancellationRequested);
+
+        var resp = new DownloadReady
+        {
+            File = fileTreeNode.RelativePath,
+            Ticket = ticket,
+            Size = fileTreeNode.Size,
+            IsEncrypted = true,
+            IsDirectUdp = false,
+            ChunkCount = (uint)chunkDict.Count
+        };
+
+        foreach (var d in chunkDict)
+            resp.Chunks.Add(new Chunk
+            {
+                Seq = (uint)d.Key,
+                Size = d.Value.size,
+                Hash = ByteString.CopyFrom(d.Value.hash)
+            });
 
         return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
             appContext,

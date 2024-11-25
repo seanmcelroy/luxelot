@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text;
 using Google.Protobuf;
 using Luxelot.Apps.Common;
+using Luxelot.Apps.Common.DHT;
 using Luxelot.Apps.FserveApp.Messages;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
@@ -17,16 +18,18 @@ namespace Luxelot.Apps.FserveApp;
 /// </summary>
 public class FileClientApp : IClientApp
 {
+    internal const string CLIENT_APP_NAME = "Fserve Client";
+
     private IAppContext? appContext;
 
     public ImmutableArray<byte>? ServerThumbprint { get; private set; }
     public ImmutableArray<byte>? SessionPublicKey { get; private set; }
     private ImmutableArray<byte>? SessionPrivateKey { get; set; }
     public ImmutableArray<byte>? SessionSharedKey { get; private set; }
-    public ImmutableArray<byte>? Principal { get; set; }
+    public ImmutableArray<byte> Principal { get; set; } = [.. Encoding.UTF8.GetBytes("ANONYMOUS")];
     public List<IConsoleCommand> Commands { get; init; } = [];
 
-    public string Name => "Fserve Client";
+    public string Name => CLIENT_APP_NAME;
 
     public string? InteractiveCommand => "fs";
 
@@ -51,7 +54,7 @@ public class FileClientApp : IClientApp
 
             Commands.Add(consoleCommand);
             consoleCommand.OnInitialize(appContext);
-            appContext.Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
+            appContext.Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.FullCommand, consoleCommandType.FullName);
         }
 
         Reset(false);
@@ -78,7 +81,8 @@ public class FileClientApp : IClientApp
             SessionPublicKey = publicKeyBytes;
             SessionPrivateKey = privateKeyBytes;
         }
-        else {
+        else
+        {
             SessionPublicKey = null;
             SessionPrivateKey = null;
         }
@@ -87,7 +91,7 @@ public class FileClientApp : IClientApp
 
     public async Task<(bool handled, bool success)> TryInvokeCommand(string command, string[] words, CancellationToken cancellationToken)
     {
-        var appCommand = Commands.FirstOrDefault(cc => string.Compare(cc.Command, command, StringComparison.InvariantCultureIgnoreCase) == 0);
+        var appCommand = Commands.FirstOrDefault(cc => string.Compare(cc.FullCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
         if (appCommand == null)
             return (false, false);
         var success = await appCommand.Invoke(words, cancellationToken);
@@ -152,9 +156,34 @@ public class FileClientApp : IClientApp
 
         var frame = FrameUtils.WrapClientFrame(
             appContext,
-            new ChangeDirectoryRequest
+            new ChangeDirectory
             {
                 Directory = directory,
+            },
+            SessionSharedKey.Value);
+
+        return await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken);
+    }
+
+    public async Task<bool> SendPrepareDownloadRequest(string file, CancellationToken cancellationToken)
+    {
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        if (ServerThumbprint == null || SessionSharedKey == null)
+        {
+            appContext.Logger?.LogInformation("Prepare download failed, no connection to a server");
+            await appContext.SendConsoleMessage($"Not connected to an fserve.", cancellationToken);
+            return false;
+        }
+
+        var frame = FrameUtils.WrapClientFrame(
+            appContext,
+            new PrepareDownload
+            {
+                File = file,
+                UseEncryption = true,
+                UseDirectUdp = false,
             },
             SessionSharedKey.Value);
 
@@ -193,7 +222,7 @@ public class FileClientApp : IClientApp
         //appContext.Logger?.LogCritical("CLIENT FSERV SESSION KEY: {SessionSharedKey}", DisplayUtils.BytesToHex(SessionSharedKey));
         appContext.Logger?.LogInformation("FSERVE AuthChannelResponse received from {SourceThumbprint}. Session shared key established.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
 
-        appContext.TryAddThumbprintSignatureCache(ServerThumbprint.Value, [.. acr.IdPubKey.ToByteArray()]);
+        appContext.TryAddDhtEntry(ServerThumbprint.Value, new NodeEntry { IdentityPublicKey = [.. acr.IdPubKey.ToByteArray()], RemoteEndpoint = null });
 
         var frame = FrameUtils.WrapClientFrame(
             appContext,
@@ -274,6 +303,38 @@ public class FileClientApp : IClientApp
         await appContext.SendConsoleMessage("End of List", cancellationToken);
         return true;
     }
+    
+    public async Task<bool> HandleDownloadReady(IRequestContext requestContext, DownloadReady dr, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestContext);
+        ArgumentNullException.ThrowIfNull(dr);
+
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        using var scope = appContext.Logger?.BeginScope(nameof(HandleListResponse));
+
+        if (ServerThumbprint == null)
+        {
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but not currently connected. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            return true;
+        }
+
+        if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
+        {
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), DisplayUtils.BytesToHex(ServerThumbprint));
+            return true;
+        }
+        appContext.Logger?.LogInformation("Received from {SourceThumbprint}: Download ready for {Filename} via ticket {Ticket}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), dr.File, dr.Ticket);
+
+        await appContext.SendConsoleMessage($"Download ready '{dr.File}': Use ticket {dr.Ticket} to retrieve {dr.ChunkCount} chunks.  Total file size {dr.Size}", cancellationToken);
+        foreach (var chunk in dr.Chunks)
+        {
+            await appContext.SendConsoleMessage($"Chunk#{chunk.Seq}: {chunk.Size} bytes, hash={DisplayUtils.BytesToHex(chunk.Hash)[..16]}...", cancellationToken);
+        }
+        await appContext.SendConsoleMessage("End of Download Ready", cancellationToken);
+        return true;
+    }
 
     public async Task<bool> HandleUserInput(string input, CancellationToken cancellationToken)
     {
@@ -283,6 +344,14 @@ public class FileClientApp : IClientApp
         var words = QuotedWordArrayRegex().Split(input).Where(s => s.Length > 0).ToArray();
         var command = words.First();
 
+        if (!appContext.TryGetSingleton(out FileClientApp? ca)
+            || ca == null)
+        {
+            appContext.Logger?.LogError("Unable to get singleton for file client");
+            await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
+            return false;
+        }
+
         var sb = new StringBuilder();
 
         switch (command.ToLowerInvariant())
@@ -290,38 +359,35 @@ public class FileClientApp : IClientApp
             case "?":
             case "help":
                 sb.AppendLine($"\r\n{InteractiveCommand}> Command List");
-                var built_in_cmds = new string[] { "version", "exit", "cd", "login", "list" };
-                sb.AppendLine($"{InteractiveCommand}> {built_in_cmds.Order().Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}")}");
+                var built_in_cmds = new string[] { "version", "exit" };
+                var loaded_cmds = ca.Commands.Select(c => c.InteractiveCommand);
+                sb.AppendLine($"{InteractiveCommand}> {built_in_cmds.Union(loaded_cmds).Order().Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}")}");
                 sb.AppendLine($"{InteractiveCommand}> End of Command List");
                 await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
                 return true;
 
             case "version":
-                var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                var version = Assembly.GetExecutingAssembly().GetName().Version;
                 await appContext.SendConsoleMessage($"{Name} v{version}", cancellationToken);
                 return true;
 
-            case "login":
-                var fsLogin = new LoginCommand();
-                fsLogin.OnInitialize(appContext);
-                return await fsLogin.Invoke(words, cancellationToken);
-
-            case "cd":
-            case "chdir":
-                var fsCd = new ChangeDirectoryCommand();
-                fsCd.OnInitialize(appContext);
-                return await fsCd.Invoke(words, cancellationToken);
-
-            case "dir":
-            case "ls":
-            case "list":
-                var fsList = new ListCommand();
-                fsList.OnInitialize(appContext);
-                return await fsList.Invoke(words, cancellationToken);
-
             default:
-                await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command {command}. Type 'exit' to exit this app.", cancellationToken);
+                // Maybe it's a command this client app loaded?
+                var appCommand = ca.Commands.FirstOrDefault(cc => 
+                    string.Compare(cc.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0
+                    || cc.InteractiveAliases.Any(a => string.Compare(a, command, StringComparison.InvariantCultureIgnoreCase) == 0));
+                if (appCommand != null)
+                {
+                    var success = await appCommand.Invoke(words, cancellationToken);
+                    if (success)
+                        return true;
+                    await appContext.SendConsoleMessage($"ERROR: {appCommand.FullCommand}", cancellationToken);
+                }
+                else
+                    await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command {command}. Type 'exit' to exit this app.", cancellationToken);
                 return false;
         }
     }
+
+    public Task OnDeactivate(CancellationToken cancellationToken) => Task.CompletedTask;
 }

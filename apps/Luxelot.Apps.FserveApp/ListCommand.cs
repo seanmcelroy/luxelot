@@ -7,7 +7,18 @@ public class ListCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string Command => "fslist";
+    public string FullCommand => "fslist";
+
+    public string InteractiveCommand => "list";
+
+    public string[] InteractiveAliases => ["ls", "dir"];
+
+    public string ShortHelp => "Lists the current directory, or the one optionally specified";
+
+    public string Usage => "list [DIRECTORY]";
+
+    public string Example => "list (OR) list /public/pictures";
+
 
     public void OnInitialize(IAppContext appContext)
     {
@@ -35,7 +46,7 @@ public class ListCommand : IConsoleCommand
             await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
             return false;
         }
-        
+
         return await fileClientApp.SendListRequest(directory, cancellationToken);
     }
 }

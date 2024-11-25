@@ -1,7 +1,9 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
+using Luxelot.Apps.Common.DHT;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 
@@ -53,4 +55,6 @@ public readonly struct NodeContext(Node node)
 
     public async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken) =>
         await _node.WriteLineToUserAsync(message, cancellationToken);
+
+    public bool TryGetDhtEntry(ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value) => _node.TryGetDhtEntry(key, out value);
 }

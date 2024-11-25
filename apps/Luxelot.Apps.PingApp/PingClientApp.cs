@@ -41,7 +41,7 @@ public class PingClientApp : IClientApp
 
             Commands.Add(consoleCommand);
             consoleCommand.OnInitialize(appContext);
-            appContext.Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.Command, consoleCommandType.FullName);
+            appContext.Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.FullCommand, consoleCommandType.FullName);
         }
     }
 
@@ -56,7 +56,7 @@ public class PingClientApp : IClientApp
 
     public async Task<(bool handled, bool success)> TryInvokeCommand(string command, string[] words, CancellationToken cancellationToken)
     {
-        var appCommand = Commands.FirstOrDefault(cc => string.Compare(cc.Command, command, StringComparison.InvariantCultureIgnoreCase) == 0);
+        var appCommand = Commands.FirstOrDefault(cc => string.Compare(cc.FullCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
         if (appCommand == null)
             return (false, false);
         var success = await appCommand.Invoke(words, cancellationToken);
@@ -99,4 +99,6 @@ public class PingClientApp : IClientApp
                 return false;
         }
     }
+
+    public Task OnDeactivate(CancellationToken cancellationToken) => Task.CompletedTask;
 }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -10,7 +11,9 @@ using System.Text;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
+using Luxelot.Apps.Common.DHT;
 using Luxelot.Config;
+using Luxelot.DHT;
 using Luxelot.Messages;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -39,9 +42,9 @@ public class Node
 
 
     // Network state
-    private readonly ConcurrentDictionary<string, ImmutableArray<byte>> ThumbprintSignatureCache = [];
     private readonly ConcurrentDictionary<UInt64, bool> ForwardIds = [];
     private readonly MemoryCache ThumbprintPeerPaths;
+    private readonly KademliaDistributedHashTable DHT;
 
 
     internal TcpClient? User;
@@ -76,6 +79,8 @@ public class Node
 
         ThumbprintPeerPaths = new(new MemoryCacheOptions { }, loggerFactory);
         Logger.LogInformation("Setup memory caches");
+
+        DHT = new(IdentityKeyPublicThumbprint);
     }
 
     public Node(IHost host, string? shortName)
@@ -107,6 +112,8 @@ public class Node
             ? new(new MemoryCacheOptions { })
             : new(new MemoryCacheOptions { }, loggerFactory);
         Logger?.LogInformation("Setup memory caches");
+
+        DHT = new(IdentityKeyPublicThumbprint);
     }
 
     internal static Node? CreateFromEncryptedKeyContainer(
@@ -449,6 +456,11 @@ public class Node
                         {
                             size = await User.GetStream().ReadAtLeastAsync(buffer, 1, cancellationToken: cancellationToken);
                         }
+                        catch (ObjectDisposedException)
+                        {
+                            User = null;
+                            continue;
+                        }
                         catch (EndOfStreamException)
                         {
                             // Swallow.
@@ -498,7 +510,12 @@ public class Node
                             Tasks.TryAdd(new TaskEntry { Name = $"Shutdown after malfored key on Syn from {peerTcpClient.Client?.RemoteEndPoint?.ToString() ?? "new peer"}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                         }
                         else
-                            ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
+                        {
+                            if (peer.IdentityPublicKeyThumbprint != null && peer.RemoteEndPoint != null)
+                                DHT.InsertBucketValue(IdentityKeyPublicThumbprint, peer.IdentityPublicKeyThumbprint.Value, new NodeEntry { RemoteEndpoint = peer.RemoteEndPoint, IdentityPublicKey = peer.IdentityPublicKey }, Logger);
+                            else
+                                throw new InvalidOperationException();
+                        }
 
                     }, cancellationToken));
                 }
@@ -544,7 +561,7 @@ public class Node
     {
         try
         {
-            Thread.Sleep(3000); // Dialer starts after 3 seconds.
+            Thread.Sleep(2000); // Dialer starts after 2 seconds.
             while (!cancellationToken.IsCancellationRequested)
             {
                 var pb = Phonebook;
@@ -597,7 +614,7 @@ public class Node
             // Peer walk
             await Parallel.ForEachAsync(Peers.Values, cancellationToken, async (peer, c) =>
             {
-                var shutdown = !await peer.HandleInputAsync(context, ThumbprintSignatureCache, cancellationToken);
+                var shutdown = !await peer.HandleInputAsync(context, cancellationToken);
                 if (shutdown)
                 {
                     Tasks.TryAdd(new TaskEntry { Name = $"Shutting down killed peer {peer.ShortName} ({peer.RemoteEndPoint})", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
@@ -610,6 +627,9 @@ public class Node
 
     private async Task SendSyn(NodeContext context, Peer peer, CancellationToken cancellationToken)
     {
+        if (peer.IsLoopback)
+            throw new InvalidOperationException($"Cannot {nameof(SendSyn)} to loopback peer.");
+
         if (peer.IsWriteable)
         {
             Logger?.LogDebug("Sending Syn to peer {LocalEndPoint}->{RemoteEndPoint}", peer.LocalEndPoint, peer.RemoteEndPoint);
@@ -630,14 +650,22 @@ public class Node
                 }
                 else
                 {
-                    ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint), peer.IdentityPublicKey.Value);
+                    DHT.InsertBucketValue(IdentityKeyPublicThumbprint, peer.IdentityPublicKeyThumbprint.Value, new NodeEntry
+                    {
+                        RemoteEndpoint = peer.RemoteEndPoint!,
+                        IdentityPublicKey = peer.IdentityPublicKey
+                    }, Logger);
 
                     // Okay, we made it!
-                    Logger?.LogDebug("Sending test message to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
+                    Logger?.LogDebug("Sending SynAck to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
 
-                    var payload = new ConsoleAlert
+                    var parts = NetUtils.ConvertIPAddressToMessageIntegers(peer.RemoteEndPoint!.Address)!;
+                    var payload = new SynAck
                     {
-                        Message = "WE DID IT!"
+                        Addr1 = parts[0],
+                        Addr2 = parts[1],
+                        Addr3 = parts[2],
+                        Addr4 = parts[3],
                     };
                     try
                     {
@@ -688,7 +716,7 @@ public class Node
                 {
                     var sb = new StringBuilder();
                     sb.AppendLine("\r\nBuilt-In Command List");
-                    var built_in_cmds = new string[] { "cache", "close", "connect", "node", "peers", "shutdown", "version" };
+                    var built_in_cmds = new string[] { "dht", "disconnect", "connect", "node", "peers", "quit", "shutdown", "version" };
                     sb.AppendLine(built_in_cmds
                         .Order()
                         .Aggregate((c, n) => $"{c}\r\n{n}"));
@@ -702,8 +730,8 @@ public class Node
                         else
                             sb.AppendLine($"{ca.Name}");
 
-                        foreach (var com in ca.Commands.OrderBy(x => x.Command))
-                            sb.AppendLine($"\t{com.Command}");
+                        foreach (var com in ca.Commands.OrderBy(x => x.FullCommand))
+                            sb.AppendLine($"\t{com.FullCommand}: {com.ShortHelp}");
                     }
                     sb.AppendLine("\r\nEnd of Command List");
                     await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
@@ -726,37 +754,42 @@ public class Node
                     break;
                 }
 
-            case "cache":
+            case "dht":
                 {
-                    await context.WriteLineToUserAsync("\r\nThumbprint Cache List", cancellationToken);
-                    var thumb_len = ThumbprintSignatureCache.IsEmpty ? 0 : ThumbprintSignatureCache.Keys.Max(p => p.Length);
-                    await context.WriteLineToUserAsync($"{"IdPubKeyThumbprint".PadRight(thumb_len)} IdPubKey", cancellationToken);
+                    await context.WriteLineToUserAsync("\r\nDHT Entry List", cancellationToken);
 
-                    foreach (var cache in ThumbprintSignatureCache)
+                    var dhtEntries = ((ICollection<BucketEntry>)DHT).ToArray();
+                    if (dhtEntries.Length > 0)
                     {
-                        await context.WriteLineToUserAsync($"{cache.Key} {DisplayUtils.BytesToHex(cache.Value)}", cancellationToken);
+                        var dht_key_len = dhtEntries.Max(be => DisplayUtils.BytesToHex(be.Key)[..8].Length);
+                        await context.WriteLineToUserAsync($"{"DhtKey".PadRight(dht_key_len)} DhtEntry", cancellationToken);
+
+                        foreach (var bucketEntry in dhtEntries)
+                        {
+                            await context.WriteLineToUserAsync($"{DisplayUtils.BytesToHex(bucketEntry.Key)[..8]} {bucketEntry.Value}", cancellationToken);
+                        }
                     }
-                    await context.WriteLineToUserAsync("End of Thumbprint Cache List", cancellationToken);
+                    await context.WriteLineToUserAsync("End of DHT Entry List", cancellationToken);
                     break;
                 }
 
-            case "close":
+            case "disconnect":
                 {
                     if (words.Length != 2)
                     {
-                        await context.WriteLineToUserAsync($"CLOSE command requires one argument, the peer short name to close.", cancellationToken);
+                        await context.WriteLineToUserAsync($"Command requires one argument, the peer short name to disconnect.", cancellationToken);
                         return;
                     }
 
-                    var peer_to_close = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
-                    if (peer_to_close == null)
+                    var peer_to_disconnect = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
+                    if (peer_to_disconnect == null)
                     {
                         await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
                         return;
                     }
 
-                    ShutdownPeer(peer_to_close);
-                    await context.WriteLineToUserAsync($"Closed connection to peer {peer_to_close.ShortName}.", cancellationToken);
+                    ShutdownPeer(peer_to_disconnect);
+                    await context.WriteLineToUserAsync($"Disconnected peer {peer_to_disconnect.ShortName}.", cancellationToken);
                     break;
                 }
 
@@ -764,7 +797,7 @@ public class Node
                 {
                     if (words.Length != 2)
                     {
-                        await context.WriteLineToUserAsync($"CONNECT command requires one argument, the remote endpoint in the format ADDRESS:PORT", cancellationToken);
+                        await context.WriteLineToUserAsync($"Command requires one argument, the remote endpoint in the format ADDRESS:PORT", cancellationToken);
                         return;
                     }
 
@@ -786,24 +819,38 @@ public class Node
 
             case "node":
                 await context.WriteLineToUserAsync($"ID Public Key: {DisplayUtils.BytesToHex(IdentityKeyPublicBytes)}", cancellationToken);
-                await context.WriteLineToUserAsync($"ID Thumbnail: {DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
+                await context.WriteLineToUserAsync($"ID Thumbprint: {DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
                 return;
 
             case "peers":
                 {
                     var sb = new StringBuilder();
                     sb.AppendLine("\r\nPeer List");
-                    var state_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.State.ToString().Length);
-                    var rep_len = Peers.IsEmpty ? 0 : Peers.Values.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
-                    sb.AppendLine($"PeerShortName {"State".PadRight(state_len)} {"RemoteEndPoint".PadRight(rep_len)} Recv Sent IdPubKeyThumbprint");
-                    foreach (var peer in Peers.Values)
+                    var peers = Peers.Values.ToArray();
+                    if (peers.Length > 0)
                     {
-                        sb.AppendLine($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State.ToString().PadRight(state_len)} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived.ToString().PadRight("Recv".Length)} {peer.BytesSent.ToString().PadRight("Sent".Length)} {DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}");
+                        var state_len = peers.Max(p => p.State.ToString().Length);
+                        var rep_len = peers.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
+                        var recv_len = peers.Max(p => p.RemoteEndPoint == null ? 0 : p.BytesReceived.ToString().PadRight("Recv".Length).Length);
+                        var sent_len = peers.Max(p => p.RemoteEndPoint == null ? 0 : p.BytesSent.ToString().PadRight("Sent".Length).Length);
+                        sb.AppendLine($"PeerShortName {"State".PadRight(state_len)} {"RemoteEndPoint".PadRight(rep_len)} {"Recv".PadRight(recv_len)} {"Sent".PadRight(sent_len)} IdPubKeyThumbprint");
+                        foreach (var peer in peers)
+                        {
+                            sb.AppendLine($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State.ToString().PadRight(state_len)} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived.ToString().PadRight(recv_len)} {peer.BytesSent.ToString().PadRight(sent_len)} {DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}");
+                        }
                     }
                     sb.AppendLine("End of Peer List");
                     await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
                     break;
                 }
+
+            case "quit":
+                await context.WriteLineToUserAsync("\r\nGOODBYE.", cancellationToken);
+                User?.Close();
+                User = null;
+                Logger?.LogInformation("Console user quit.");
+                break;
+
             case "shutdown":
                 Environment.Exit(0);
                 break;
@@ -820,12 +867,12 @@ public class Node
                     }
 
                     // Or maybe it's a command this client app loaded?
-                    var appCommand = ca.Commands.FirstOrDefault(cc => string.Compare(cc.Command, command, StringComparison.InvariantCultureIgnoreCase) == 0);
+                    var appCommand = ca.Commands.FirstOrDefault(cc => string.Compare(cc.FullCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
                     if (appCommand != null)
                     {
                         var success = await appCommand.Invoke(words, cancellationToken);
                         if (!success)
-                            await context.WriteLineToUserAsync($"ERROR: {appCommand.Command}", cancellationToken);
+                            await context.WriteLineToUserAsync($"ERROR: {appCommand.FullCommand}", cancellationToken);
                         return;
                     }
                 }
@@ -856,10 +903,10 @@ public class Node
         ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(innerPayload);
 
-        if (routingPeerThumbprint != null && routingPeerThumbprint.Value.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(routingPeerThumbprint), $"Thumbprints must be {Constants.THUMBPRINT_LEN} bytes, but the one provided was {routingPeerThumbprint.Value.Length} bytes");
-        if (ultimateDestinationThumbprint.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprints must be {Constants.THUMBPRINT_LEN} bytes, but the one provided was {ultimateDestinationThumbprint.Length} bytes");
+        if (routingPeerThumbprint != null && routingPeerThumbprint.Value.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(routingPeerThumbprint), $"Thumbprints must be {Apps.Common.Constants.THUMBPRINT_LEN} bytes, but the one provided was {routingPeerThumbprint.Value.Length} bytes");
+        if (ultimateDestinationThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(ultimateDestinationThumbprint), $"Thumbprints must be {Apps.Common.Constants.THUMBPRINT_LEN} bytes, but the one provided was {ultimateDestinationThumbprint.Length} bytes");
 
         // Can I send this to a neighboring peer? (the answer is always no if routing != ultimate for source routed outbound)
         var direct_peer = (routingPeerThumbprint != null && !Enumerable.SequenceEqual(routingPeerThumbprint, ultimateDestinationThumbprint))
@@ -908,8 +955,8 @@ public class Node
         ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
         ArgumentNullException.ThrowIfNull(payload);
 
-        if (destinationIdPubKeyThumbprint.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(destinationIdPubKeyThumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {destinationIdPubKeyThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (destinationIdPubKeyThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(destinationIdPubKeyThumbprint), $"Thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {destinationIdPubKeyThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         if (Enumerable.SequenceEqual(destinationIdPubKeyThumbprint, IdentityKeyPublicThumbprint))
             throw new ArgumentException("Attempted to prepare direct messages to my own node", nameof(destinationIdPubKeyThumbprint));
@@ -991,8 +1038,8 @@ public class Node
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentNullException.ThrowIfNull(thumbprint);
 
-        if (thumbprint != null && thumbprint.Value.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Value.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (thumbprint != null && thumbprint.Value.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Value.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         // This cache is keyed by string representations of thumbprints.
         // The cache value is the peer short name
@@ -1009,8 +1056,8 @@ public class Node
         ArgumentNullException.ThrowIfNull(original);
         ArgumentNullException.ThrowIfNull(logger);
 
-        if (excludedNeighborThumbprint != null && excludedNeighborThumbprint.Value.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(excludedNeighborThumbprint), $"Thumbprints must be {Constants.THUMBPRINT_LEN} bytes, but the one provided was {excludedNeighborThumbprint.Value.Length} bytes");
+        if (excludedNeighborThumbprint != null && excludedNeighborThumbprint.Value.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(excludedNeighborThumbprint), $"Thumbprints must be {Apps.Common.Constants.THUMBPRINT_LEN} bytes, but the one provided was {excludedNeighborThumbprint.Value.Length} bytes");
 
         var relayed = new ForwardedMessage
         {
@@ -1048,25 +1095,30 @@ public class Node
         return (false, false);
     }
 
-    public bool TryAddThumbprintSignatureCache(ImmutableArray<byte> thumbprint, ImmutableArray<byte> publicKey)
+    public bool TryAddDhtEntry(ImmutableArray<byte> key, IBucketEntryValue value)
     {
-        ArgumentNullException.ThrowIfNull(thumbprint);
-        ArgumentNullException.ThrowIfNull(publicKey);
-
-        if (thumbprint.Length != Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
-        if (publicKey.Length != Constants.KYBER_PUBLIC_KEY_LEN)
-            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Public key should be {Constants.KYBER_PUBLIC_KEY_LEN} bytes long but was {publicKey.Length} bytes.");
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(value);
 
         // Don't add loopback
-        if (thumbprint.All(b => b == 0x00))
+        if (key.All(b => b == 0x00))
             return false;
 
-        // Verify these match - be paranoid.
-        if (!Enumerable.SequenceEqual(thumbprint, SHA256.HashData([.. publicKey])))
-            return false;
+        return DHT.InsertBucketValue(IdentityKeyPublicThumbprint, key, value, Logger);
+    }
 
-        return ThumbprintSignatureCache.TryAdd(DisplayUtils.BytesToHex(thumbprint), publicKey);
+    public bool TryGetDhtEntry(ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+
+        // Don't add loopback
+        if (key.All(b => b == 0x00))
+        {
+            value = null;
+            return false;
+        }
+
+        return DHT.TryGetValue(IdentityKeyPublicThumbprint, key, out value);
     }
 
     internal async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken)
@@ -1119,5 +1171,39 @@ public class Node
         aes.Key = pbk;
         var encrypted = aes.EncryptCbc(jsonBytes, salt, PaddingMode.PKCS7);
         return (encrypted, salt.ConvertToBase62());
+    }
+
+    public async Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken)
+    {
+        if (ActiveClientApp != null && string.Compare(ActiveClientApp.Name, clientAppName, StringComparison.Ordinal) == 0)
+            return true; // Already active.
+
+        foreach (var ca in ClientApps)
+        {
+            // Maybe it's a client app that has an interactive mode?
+            if (string.Compare(ca.Name, clientAppName, StringComparison.Ordinal) == 0)
+            {
+                ActiveClientApp = ca;
+                await ca.OnActivate(cancellationToken);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public async Task<bool> ExitAppInteractiveMode(string clientAppName, CancellationToken cancellationToken)
+    {
+        if (ActiveClientApp == null)
+            return true; // Already not active
+
+        if (ActiveClientApp != null && string.Compare(ActiveClientApp.Name, clientAppName, StringComparison.Ordinal) == 0)
+        {
+            await ActiveClientApp.OnDeactivate(cancellationToken);
+            ActiveClientApp = null;
+            return true;
+        }
+
+        return false;
     }
 }

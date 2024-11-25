@@ -26,9 +26,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
           string.Concat(
             "CgxzdGF0dXMucHJvdG8ibAoGU3RhdHVzEh0KCW9wZXJhdGlvbhgBIAEoDjIK",
             "Lk9wZXJhdGlvbhITCgtzdGF0dXNfY29kZRgCIAEoBRIWCg5zdGF0dXNfbWVz",
-            "c2FnZRgDIAEoCRIWCg5yZXN1bHRfcGF5bG9hZBgEIAEoDCoxCglPcGVyYXRp",
-            "b24SCAoETk9ORRAAEhIKDkFVVEhFTlRJQ0FUSU9OEAESBgoCQ0QQAkIiqgIf",
-            "THV4ZWxvdC5BcHBzLkZzZXJ2ZUFwcC5NZXNzYWdlc2IGcHJvdG8z"));
+            "c2FnZRgDIAEoCRIWCg5yZXN1bHRfcGF5bG9hZBgEIAEoDCpHCglPcGVyYXRp",
+            "b24SCAoETk9ORRAAEhIKDkFVVEhFTlRJQ0FUSU9OEAESBgoCQ0QQAhIUChBQ",
+            "UkVQQVJFX0RPV05MT0FEEANCIqoCH0x1eGVsb3QuQXBwcy5Gc2VydmVBcHAu",
+            "TWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.FserveApp.Messages.Operation), }, null, new pbr::GeneratedClrTypeInfo[] {
@@ -43,6 +44,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     [pbr::OriginalName("NONE")] None = 0,
     [pbr::OriginalName("AUTHENTICATION")] Authentication = 1,
     [pbr::OriginalName("CD")] Cd = 2,
+    [pbr::OriginalName("PREPARE_DOWNLOAD")] PrepareDownload = 3,
   }
 
   #endregion

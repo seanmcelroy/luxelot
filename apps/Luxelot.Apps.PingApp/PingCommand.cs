@@ -10,7 +10,17 @@ public class PingCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string Command => "ping";
+    public string FullCommand => "ping";
+
+    public string InteractiveCommand => "ping";
+
+    public string[] InteractiveAliases => [];
+
+    public string ShortHelp => "Sends a request for a reply from a remote host";
+
+    public string Usage => "ping [PEER_SHORT_NAME_ROUTE_THROUGH|NODE_ID_THUMBPRINT_ROUTE_THROUGH] <PEER_SHORT_NAME_TO_PING|NODE_ID_THUMBPRINT_TO_PING>";
+
+    public string Example => "ping 00000000";
 
     public void OnInitialize(IAppContext appContext)
     {
@@ -25,7 +35,7 @@ public class PingCommand : IConsoleCommand
 
         if (words.Length != 2 && words.Length != 3)
         {
-            await appContext.SendConsoleMessage($"PING command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
+            await appContext.SendConsoleMessage($"Command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
             return false;
         }
 

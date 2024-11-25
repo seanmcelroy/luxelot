@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Apps.FserveApp.Messages";
+
+message PrepareDownload
+ {
+    string file = 1;
+    bool use_encryption = 2;
+    bool use_direct_udp = 3;
+    fixed32 direct_udp_addr1 = 4;
+    fixed32 direct_udp_addr2 = 5;
+    fixed32 direct_udp_addr3 = 6;
+    fixed32 direct_udp_addr4 = 7;
+    int32 direct_udp_port = 8;
+}

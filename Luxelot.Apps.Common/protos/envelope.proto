@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option csharp_namespace = "Luxelot.App.Common.Messages";
+option csharp_namespace = "Luxelot.Apps.Common.Messages";
 
 message Envelope {
     bytes nonce = 1;

@@ -11,6 +11,7 @@ public interface IClientApp
     public void OnInitialize(IAppContext appContext);
 
     public Task OnActivate(CancellationToken cancellationToken);
+    public Task OnDeactivate(CancellationToken cancellationToken);
 
     public Task<bool> HandleUserInput(string input, CancellationToken cancellationToken);
 }

@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
-using Luxelot.App.Common.Messages;
+using Luxelot.Apps.Common.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
@@ -14,7 +14,7 @@ namespace Luxelot;
 public static class CryptoUtils
 {
     private static readonly Mutex mutex = new();
-    private readonly static SecureRandom SecureRandom = new();
+    private static readonly SecureRandom SecureRandom = new();
 
     // Kyber - Super helpful: https://stackoverflow.com/questions/75240825/implementing-crystals-kyber-using-bouncycastle-java
     // Dilithium - Super helpful: https://asecuritysite.com/bouncy/bc_dil

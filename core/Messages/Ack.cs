@@ -24,13 +24,14 @@ namespace Luxelot.Messages {
     static AckReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "CglhY2sucHJvdG8iQAoDQWNrEhAKCHByb3RfdmVyGAEgASgNEhMKC2NpcGhl",
-            "cl90ZXh0GAIgASgMEhIKCmlkX3B1Yl9rZXkYAyABKAxCE6oCEEx1eGVsb3Qu",
-            "TWVzc2FnZXNiBnByb3RvMw=="));
+            "CglhY2sucHJvdG8ifAoDQWNrEhAKCHByb3RfdmVyGAEgASgNEhMKC2NpcGhl",
+            "cl90ZXh0GAIgASgMEhIKCmlkX3B1Yl9rZXkYAyABKAwSDQoFYWRkcjEYBCAB",
+            "KAcSDQoFYWRkcjIYBSABKAcSDQoFYWRkcjMYBiABKAcSDQoFYWRkcjQYByAB",
+            "KAdCE6oCEEx1eGVsb3QuTWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.Ack), global::Luxelot.Messages.Ack.Parser, new[]{ "ProtVer", "CipherText", "IdPubKey" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Messages.Ack), global::Luxelot.Messages.Ack.Parser, new[]{ "ProtVer", "CipherText", "IdPubKey", "Addr1", "Addr2", "Addr3", "Addr4" }, null, null, null, null)
           }));
     }
     #endregion
@@ -74,6 +75,10 @@ namespace Luxelot.Messages {
       protVer_ = other.protVer_;
       cipherText_ = other.cipherText_;
       idPubKey_ = other.idPubKey_;
+      addr1_ = other.addr1_;
+      addr2_ = other.addr2_;
+      addr3_ = other.addr3_;
+      addr4_ = other.addr4_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -119,6 +124,54 @@ namespace Luxelot.Messages {
       }
     }
 
+    /// <summary>Field number for the "addr1" field.</summary>
+    public const int Addr1FieldNumber = 4;
+    private uint addr1_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint Addr1 {
+      get { return addr1_; }
+      set {
+        addr1_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "addr2" field.</summary>
+    public const int Addr2FieldNumber = 5;
+    private uint addr2_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint Addr2 {
+      get { return addr2_; }
+      set {
+        addr2_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "addr3" field.</summary>
+    public const int Addr3FieldNumber = 6;
+    private uint addr3_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint Addr3 {
+      get { return addr3_; }
+      set {
+        addr3_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "addr4" field.</summary>
+    public const int Addr4FieldNumber = 7;
+    private uint addr4_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint Addr4 {
+      get { return addr4_; }
+      set {
+        addr4_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -137,6 +190,10 @@ namespace Luxelot.Messages {
       if (ProtVer != other.ProtVer) return false;
       if (CipherText != other.CipherText) return false;
       if (IdPubKey != other.IdPubKey) return false;
+      if (Addr1 != other.Addr1) return false;
+      if (Addr2 != other.Addr2) return false;
+      if (Addr3 != other.Addr3) return false;
+      if (Addr4 != other.Addr4) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -147,6 +204,10 @@ namespace Luxelot.Messages {
       if (ProtVer != 0) hash ^= ProtVer.GetHashCode();
       if (CipherText.Length != 0) hash ^= CipherText.GetHashCode();
       if (IdPubKey.Length != 0) hash ^= IdPubKey.GetHashCode();
+      if (Addr1 != 0) hash ^= Addr1.GetHashCode();
+      if (Addr2 != 0) hash ^= Addr2.GetHashCode();
+      if (Addr3 != 0) hash ^= Addr3.GetHashCode();
+      if (Addr4 != 0) hash ^= Addr4.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -177,6 +238,22 @@ namespace Luxelot.Messages {
         output.WriteRawTag(26);
         output.WriteBytes(IdPubKey);
       }
+      if (Addr1 != 0) {
+        output.WriteRawTag(37);
+        output.WriteFixed32(Addr1);
+      }
+      if (Addr2 != 0) {
+        output.WriteRawTag(45);
+        output.WriteFixed32(Addr2);
+      }
+      if (Addr3 != 0) {
+        output.WriteRawTag(53);
+        output.WriteFixed32(Addr3);
+      }
+      if (Addr4 != 0) {
+        output.WriteRawTag(61);
+        output.WriteFixed32(Addr4);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -199,6 +276,22 @@ namespace Luxelot.Messages {
         output.WriteRawTag(26);
         output.WriteBytes(IdPubKey);
       }
+      if (Addr1 != 0) {
+        output.WriteRawTag(37);
+        output.WriteFixed32(Addr1);
+      }
+      if (Addr2 != 0) {
+        output.WriteRawTag(45);
+        output.WriteFixed32(Addr2);
+      }
+      if (Addr3 != 0) {
+        output.WriteRawTag(53);
+        output.WriteFixed32(Addr3);
+      }
+      if (Addr4 != 0) {
+        output.WriteRawTag(61);
+        output.WriteFixed32(Addr4);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -217,6 +310,18 @@ namespace Luxelot.Messages {
       }
       if (IdPubKey.Length != 0) {
         size += 1 + pb::CodedOutputStream.ComputeBytesSize(IdPubKey);
+      }
+      if (Addr1 != 0) {
+        size += 1 + 4;
+      }
+      if (Addr2 != 0) {
+        size += 1 + 4;
+      }
+      if (Addr3 != 0) {
+        size += 1 + 4;
+      }
+      if (Addr4 != 0) {
+        size += 1 + 4;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -238,6 +343,18 @@ namespace Luxelot.Messages {
       }
       if (other.IdPubKey.Length != 0) {
         IdPubKey = other.IdPubKey;
+      }
+      if (other.Addr1 != 0) {
+        Addr1 = other.Addr1;
+      }
+      if (other.Addr2 != 0) {
+        Addr2 = other.Addr2;
+      }
+      if (other.Addr3 != 0) {
+        Addr3 = other.Addr3;
+      }
+      if (other.Addr4 != 0) {
+        Addr4 = other.Addr4;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -266,6 +383,22 @@ namespace Luxelot.Messages {
             IdPubKey = input.ReadBytes();
             break;
           }
+          case 37: {
+            Addr1 = input.ReadFixed32();
+            break;
+          }
+          case 45: {
+            Addr2 = input.ReadFixed32();
+            break;
+          }
+          case 53: {
+            Addr3 = input.ReadFixed32();
+            break;
+          }
+          case 61: {
+            Addr4 = input.ReadFixed32();
+            break;
+          }
         }
       }
     #endif
@@ -291,6 +424,22 @@ namespace Luxelot.Messages {
           }
           case 26: {
             IdPubKey = input.ReadBytes();
+            break;
+          }
+          case 37: {
+            Addr1 = input.ReadFixed32();
+            break;
+          }
+          case 45: {
+            Addr2 = input.ReadFixed32();
+            break;
+          }
+          case 53: {
+            Addr3 = input.ReadFixed32();
+            break;
+          }
+          case 61: {
+            Addr4 = input.ReadFixed32();
             break;
           }
         }

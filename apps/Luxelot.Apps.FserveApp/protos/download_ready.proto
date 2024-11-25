@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Apps.FserveApp.Messages";
+
+message DownloadReady
+ {
+    string file = 1;
+    string ticket = 2;
+    uint64 size = 3;
+    bytes hash = 4;
+
+    bool is_encrypted = 5;
+    bool is_direct_udp = 6;
+    fixed32 direct_udp_addr1 = 7;
+    fixed32 direct_udp_addr2 = 8;
+    fixed32 direct_udp_addr3 = 9;
+    fixed32 direct_udp_addr4 = 10;
+    int32 direct_udp_port = 11;
+
+    uint32 chunk_count = 12;
+    repeated Chunk chunks = 13;
+}
+
+message Chunk {
+    uint32 seq = 1;
+    uint64 size = 2;
+    bytes hash = 3;
+}

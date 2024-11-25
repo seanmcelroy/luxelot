@@ -15,4 +15,5 @@ enum ServerFrameType {
     AuthUserChallenge = 0;
     Status = 1;
     ListResponse = 2;
+    DownloadReady = 3;
 }

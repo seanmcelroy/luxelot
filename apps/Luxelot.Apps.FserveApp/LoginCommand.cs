@@ -8,7 +8,18 @@ public class LoginCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string Command => "fslogin";
+    public string FullCommand => "fslogin";
+
+    public string InteractiveCommand => "login";
+
+    public string[] InteractiveAliases => [];
+
+    public string ShortHelp => "Established a session with a remote fserve";
+
+    public string Usage => "fslogin <PEER_SHORT_NAME|NODE_ID_THUMBPRINT> [USERNAME]";
+
+    public string Example => "fslogin 00000000 ANONYMOUS";
+
 
     public void OnInitialize(IAppContext appContext)
     {
@@ -21,9 +32,9 @@ public class LoginCommand : IConsoleCommand
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
-        if (words.Length != 3)
+        if (words.Length != 2 && words.Length != 3)
         {
-            await appContext.SendConsoleMessage($"FSLOGIN command requires two arguments: the peer short name OR destination thumbprint to direct the request and a username.", cancellationToken);
+            await appContext.SendConsoleMessage($"Command requires one or two arguments: the peer short name OR destination thumbprint to direct the request and a username.  If no username is provided, ANONYMOUS will be sent as the username.", cancellationToken);
             return false;
         }
 
@@ -51,6 +62,12 @@ public class LoginCommand : IConsoleCommand
             return false;
         }
 
-        return await fileClientApp.SendAuthChannelBegin(ultimateDestinationThumbprint.Value, words[2], cancellationToken);
+        var username = words.Length == 3 ? words[2] : "ANONYMOUS";
+        var success = await fileClientApp.SendAuthChannelBegin(ultimateDestinationThumbprint.Value, username, cancellationToken);
+
+        if (success)
+            _ = await appContext.EnterAppInteractiveMode(FileClientApp.CLIENT_APP_NAME, cancellationToken);
+
+        return success;
     }
 }
