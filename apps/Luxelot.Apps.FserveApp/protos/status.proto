@@ -15,4 +15,5 @@ enum Operation {
     AUTHENTICATION = 1;
     CD = 2;
     PREPARE_DOWNLOAD = 3;
+    GET_CHUNK = 4;
 }

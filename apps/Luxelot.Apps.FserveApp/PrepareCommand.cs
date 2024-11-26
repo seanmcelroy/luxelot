@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.FserveApp;
 
-public class PrepareDownloadCommand : IConsoleCommand
+public class PrepareCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
@@ -13,7 +13,7 @@ public class PrepareDownloadCommand : IConsoleCommand
 
     public string[] InteractiveAliases => ["prep"];
 
-    public string ShortHelp => "Prepares a file for download.  This can be retrieved by a subsequent fsget command.";
+    public string ShortHelp => "Prepares a file for download.  This can be retrieved by a subsequent fsdownload command.";
 
     public string Usage => "prepare <FILE>";
 

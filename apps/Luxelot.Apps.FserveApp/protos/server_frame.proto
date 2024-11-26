@@ -16,4 +16,5 @@ enum ServerFrameType {
     Status = 1;
     ListResponse = 2;
     DownloadReady = 3;
+    ChunkResponse = 4;
 }

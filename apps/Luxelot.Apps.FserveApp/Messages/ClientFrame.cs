@@ -27,10 +27,11 @@ namespace Luxelot.Apps.FserveApp.Messages {
             "ChJjbGllbnRfZnJhbWUucHJvdG8ifAoLQ2xpZW50RnJhbWUSDQoFbm9uY2UY",
             "ASABKAwSEgoKY2lwaGVydGV4dBgCIAEoDBILCgN0YWcYAyABKAwSFwoPYXNz",
             "b2NpYXRlZF9kYXRhGAQgASgMEiQKCmZyYW1lX3R5cGUYBSABKA4yEC5DbGll",
-            "bnRGcmFtZVR5cGUqdQoPQ2xpZW50RnJhbWVUeXBlEhEKDUF1dGhVc2VyQmVn",
-            "aW4QABIUChBBdXRoVXNlclJlc3BvbnNlEAESDwoLTGlzdFJlcXVlc3QQAhIT",
-            "Cg9DaGFuZ2VEaXJlY3RvcnkQAxITCg9QcmVwYXJlRG93bmxvYWQQBEIiqgIf",
-            "THV4ZWxvdC5BcHBzLkZzZXJ2ZUFwcC5NZXNzYWdlc2IGcHJvdG8z"));
+            "bnRGcmFtZVR5cGUqhwEKD0NsaWVudEZyYW1lVHlwZRIRCg1BdXRoVXNlckJl",
+            "Z2luEAASFAoQQXV0aFVzZXJSZXNwb25zZRABEg8KC0xpc3RSZXF1ZXN0EAIS",
+            "EwoPQ2hhbmdlRGlyZWN0b3J5EAMSEwoPUHJlcGFyZURvd25sb2FkEAQSEAoM",
+            "Q2h1bmtSZXF1ZXN0EAVCIqoCH0x1eGVsb3QuQXBwcy5Gc2VydmVBcHAuTWVz",
+            "c2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.FserveApp.Messages.ClientFrameType), }, null, new pbr::GeneratedClrTypeInfo[] {
@@ -47,6 +48,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     [pbr::OriginalName("ListRequest")] ListRequest = 2,
     [pbr::OriginalName("ChangeDirectory")] ChangeDirectory = 3,
     [pbr::OriginalName("PrepareDownload")] PrepareDownload = 4,
+    [pbr::OriginalName("ChunkRequest")] ChunkRequest = 5,
   }
 
   #endregion

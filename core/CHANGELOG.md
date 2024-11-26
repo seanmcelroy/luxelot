@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3 - 2024-11-25
+
+### Changed
+
+- Adjusted core to handle messages up to 1MB+1KB, up from 16KB
+- Improved exception handling during message processing
+
 ## 1.2 - 2024-11-24
 
 ### Changed

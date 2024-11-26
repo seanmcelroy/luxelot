@@ -23,6 +23,8 @@ public static class FrameUtils
             frameType = ServerFrameType.ListResponse;
         else if (message is DownloadReady)
             frameType = ServerFrameType.DownloadReady;
+        else if (message is ChunkResponse)
+            frameType = ServerFrameType.ChunkResponse;
         else
         {
             appContext?.Logger?.LogError("Unknown frame type: {TypeName}", message.GetType().FullName);
@@ -55,6 +57,8 @@ public static class FrameUtils
             frameType = ClientFrameType.ChangeDirectory;
         else if (message is PrepareDownload)
             frameType = ClientFrameType.PrepareDownload;
+        else if (message is ChunkRequest)
+            frameType = ClientFrameType.ChunkRequest;
         else
             throw new NotImplementedException($"Unknown frame type: {message.GetType().FullName}");
 
@@ -88,6 +92,7 @@ public static class FrameUtils
             ClientFrameType.ListRequest => ListRequest.Parser.ParseFrom(decrypted),
             ClientFrameType.ChangeDirectory => ChangeDirectory.Parser.ParseFrom(decrypted),
             ClientFrameType.PrepareDownload => PrepareDownload.Parser.ParseFrom(decrypted),
+            ClientFrameType.ChunkRequest => ChunkRequest.Parser.ParseFrom(decrypted),
             _ => throw new NotImplementedException($"Unknown frame type: {frame.FrameType}"),
         };
     }
@@ -111,6 +116,7 @@ public static class FrameUtils
             ServerFrameType.Status => Status.Parser.ParseFrom(decrypted),
             ServerFrameType.ListResponse => ListResponse.Parser.ParseFrom(decrypted),
             ServerFrameType.DownloadReady => DownloadReady.Parser.ParseFrom(decrypted),
+            ServerFrameType.ChunkResponse => ChunkResponse.Parser.ParseFrom(decrypted),
             _ => throw new NotImplementedException($"Unknown frame type: {frame.FrameType}"),
         };
     }

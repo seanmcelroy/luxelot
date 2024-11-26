@@ -17,4 +17,5 @@ enum ClientFrameType {
     ListRequest = 2;
     ChangeDirectory = 3;
     PrepareDownload = 4;
+    ChunkRequest = 5;
 }

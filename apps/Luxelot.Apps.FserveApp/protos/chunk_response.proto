@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Apps.FserveApp.Messages";
+
+message ChunkResponse
+ {
+    string download_ticket = 1;
+    uint32 chunk_seq = 2;
+    bytes payload = 3;
+}

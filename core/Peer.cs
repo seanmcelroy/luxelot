@@ -49,7 +49,7 @@ internal class Peer : IDisposable
         LoopbackStream = new LoopbackStream(logger);
         State = PeerState.ESTABLISHED;
 
-        IdentityPublicKeyThumbprint = new byte[Apps.Common.Constants.THUMBPRINT_LEN].ToImmutableArray();
+        IdentityPublicKeyThumbprint = new byte[Constants.THUMBPRINT_LEN].ToImmutableArray();
         Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
         ShortName = $"{Name[..8]}";
     }
@@ -57,7 +57,7 @@ internal class Peer : IDisposable
     private Peer(TcpClient tcpClient)
     {
         ArgumentNullException.ThrowIfNull(tcpClient);
-        
+
         Client = tcpClient;
     }
 
@@ -114,7 +114,7 @@ internal class Peer : IDisposable
             return true; // We don't need to shut it down, we just don't need to do anything here.
 
         // Fully established with data to read.
-        var buffer = new byte[16 * 1024]; // 16 kb
+        var buffer = new byte[1024 * 1024 + 1024]; // 1MB + 1kb
         int size;
         try
         {
@@ -284,10 +284,16 @@ internal class Peer : IDisposable
                         }
                     }
 
-                    return await HandleMessage(nodeContext, fwd_origin_pub_thumbprint, fwd.Payload, cancellationToken);
-
-                    // The sender provided no public key, so it is unverified
-                    //return await HandleMessage(nodeContext, null, fwd.Payload, cancellationToken);
+                    try
+                    {
+                        return await HandleMessage(nodeContext, fwd_origin_pub_thumbprint, fwd.Payload, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        nodeContext.Logger?.LogError(ex, "Unable to handle forwarded message from {PeerShortName} ({RemoteEndPoint}). Closing.", ShortName, RemoteEndPoint);
+                        Client?.Close();
+                        return false;
+                    }
             }
         }
         else if (envelopePayload.DirectedMessage != null)
@@ -374,7 +380,16 @@ internal class Peer : IDisposable
         }
 
         ImmutableArray<byte> srcThumbprint = [.. dm.SrcIdentityThumbprint.ToByteArray()];
-        return await HandleMessage(nodeContext, srcThumbprint, dm.Payload, cancellationToken);
+
+        try
+        {
+            return await HandleMessage(nodeContext, srcThumbprint, dm.Payload, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            nodeContext.Logger?.LogError(ex, "Unable to handle direct message from {PeerShortName} ({RemoteEndPoint}).", ShortName, RemoteEndPoint);
+            return false;
+        }
     }
     #endregion 
 
@@ -574,7 +589,7 @@ internal class Peer : IDisposable
         switch (message)
         {
             case Any any when any.Is(SynAck.Descriptor):
-                    var synack = any.Unpack<SynAck>();
+                var synack = any.Unpack<SynAck>();
                 HandleSynAck(nodeContext, synack, cancellationToken);
                 return true;
             case Any any when any.Is(ErrorDestinationUnreachable.Descriptor):

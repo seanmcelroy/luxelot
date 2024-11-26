@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Data;
 using System.Reflection;
 using System.Text;
 using Google.Protobuf;
@@ -22,6 +24,10 @@ public class FileClientApp : IClientApp
 
     private IAppContext? appContext;
 
+    public string Name => CLIENT_APP_NAME;
+
+    public string? InteractiveCommand => "fs";
+
     public ImmutableArray<byte>? ServerThumbprint { get; private set; }
     public ImmutableArray<byte>? SessionPublicKey { get; private set; }
     private ImmutableArray<byte>? SessionPrivateKey { get; set; }
@@ -29,9 +35,12 @@ public class FileClientApp : IClientApp
     public ImmutableArray<byte> Principal { get; set; } = [.. Encoding.UTF8.GetBytes("ANONYMOUS")];
     public List<IConsoleCommand> Commands { get; init; } = [];
 
-    public string Name => CLIENT_APP_NAME;
+    /// <summary>
+    /// Chunks available to be downloaded, keyed by the download 'ticket' and the chunks as the key.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, ChunkInfo[]> ClientChunks = [];
 
-    public string? InteractiveCommand => "fs";
+    private (string ticket, uint index)? currentChunkGet = null;
 
     public void OnInitialize(IAppContext appContext)
     {
@@ -109,7 +118,7 @@ public class FileClientApp : IClientApp
         Reset(true);
 
         ServerThumbprint = destinationThumbprint;
-        Principal = Encoding.UTF8.GetBytes(username).ToImmutableArray();
+        Principal = [.. Encoding.UTF8.GetBytes(username)];
 
         return await appContext.SendMessage(destinationThumbprint, new AuthChannelBegin
         {
@@ -184,6 +193,61 @@ public class FileClientApp : IClientApp
                 File = file,
                 UseEncryption = true,
                 UseDirectUdp = false,
+            },
+            SessionSharedKey.Value);
+
+        return await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken);
+    }
+
+    public async Task<bool> SendDownloadRequests(string fileOrTicket, uint? chunkNumber, CancellationToken cancellationToken)
+    {
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        if (ServerThumbprint == null || SessionSharedKey == null)
+        {
+            appContext.Logger?.LogInformation("Download failed, no connection to a server");
+            await appContext.SendConsoleMessage($"Not connected to an fserve.", cancellationToken);
+            return false;
+        }
+
+        // Was a ticket supplied?
+        ChunkInfo[] chunks;
+        if (ClientChunks.TryGetValue(fileOrTicket, out ChunkInfo[]? value))
+            chunks = value;
+        else
+        {
+            // Try to identify it by filename.
+            var candidates = ClientChunks
+                .Where(cc => cc.Value.All(v => string.Compare(v.FileName, fileOrTicket, StringComparison.OrdinalIgnoreCase) == 0))
+                .ToArray();
+
+            if (candidates.Length == 0)
+            {
+                await appContext.SendConsoleMessage($"No known chunks ready for download with filename or ticket '{fileOrTicket}'.", cancellationToken);
+                return false;
+            }
+
+            if (candidates.Length > 1)
+            {
+                await appContext.SendConsoleMessage($"Multiple chunks match the filename '{fileOrTicket}'. Specify a ticket number instead", cancellationToken);
+                return false;
+            }
+
+            chunks = candidates[0].Value;
+        }
+
+        await appContext.SendConsoleMessage($"Starting download of {chunks.Length} chunk(s) from {DisplayUtils.BytesToHex(chunks[0].ServerThumbprint)[..8]}", cancellationToken);
+
+        // Set state for what we are downloading for sequential chunk handling
+        currentChunkGet = (chunks[0].DownloadTicket, 1);
+
+        var frame = FrameUtils.WrapClientFrame(
+            appContext,
+            new ChunkRequest
+            {
+                DownloadTicket = chunks[0].DownloadTicket,
+                ChunkSeq = 1,
             },
             SessionSharedKey.Value);
 
@@ -295,15 +359,17 @@ public class FileClientApp : IClientApp
         }
         appContext.Logger?.LogInformation("Received from {SourceThumbprint}: {StatusCode} {StatusMessage}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), listResponse.StatusCode, listResponse.StatusMessage);
 
-        await appContext.SendConsoleMessage($"Listing for '{listResponse.Directory}':    {listResponse.StatusCode}", cancellationToken);
+        var sb = new StringBuilder();
+        sb.AppendLine($"Listing for '{listResponse.Directory}':    {listResponse.StatusCode}");
         foreach (var result in listResponse.Results)
         {
-            await appContext.SendConsoleMessage($"{result.Name} {result.Size}", cancellationToken);
+            sb.AppendLine($"{result.Name} {result.Size}");
         }
-        await appContext.SendConsoleMessage("End of List", cancellationToken);
+        sb.AppendLine("End of List");
+        await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
         return true;
     }
-    
+
     public async Task<bool> HandleDownloadReady(IRequestContext requestContext, DownloadReady dr, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(requestContext);
@@ -312,7 +378,7 @@ public class FileClientApp : IClientApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        using var scope = appContext.Logger?.BeginScope(nameof(HandleListResponse));
+        using var scope = appContext.Logger?.BeginScope(nameof(HandleDownloadReady));
 
         if (ServerThumbprint == null)
         {
@@ -327,15 +393,57 @@ public class FileClientApp : IClientApp
         }
         appContext.Logger?.LogInformation("Received from {SourceThumbprint}: Download ready for {Filename} via ticket {Ticket}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), dr.File, dr.Ticket);
 
-        await appContext.SendConsoleMessage($"Download ready '{dr.File}': Use ticket {dr.Ticket} to retrieve {dr.ChunkCount} chunks.  Total file size {dr.Size}", cancellationToken);
-        foreach (var chunk in dr.Chunks)
+        List<ChunkInfo> remoteChunks =
+        [
+            .. dr.Chunks.Select(chunk => new ChunkInfo
+            {
+                ServerThumbprint = ServerThumbprint.Value,
+                FileName = dr.File,
+                DownloadTicket = dr.Ticket,
+                FileSize = dr.Size,
+                FileHash = [.. dr.Hash],
+                ChunkSequence = chunk.Seq,
+                ChunkSize = (uint)chunk.Size,
+                ChunkHash = [.. chunk.Hash]
+            }),
+        ];
+
+        // Did we get all the chunks?
+        if (remoteChunks.Count != dr.ChunkCount)
         {
-            await appContext.SendConsoleMessage($"Chunk#{chunk.Seq}: {chunk.Size} bytes, hash={DisplayUtils.BytesToHex(chunk.Hash)[..16]}...", cancellationToken);
+            appContext.Logger?.LogError("Received incomplete chunk list from {SourceThumbprint} for ticket {Ticket}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), dr.Ticket);
+            return true;
         }
-        await appContext.SendConsoleMessage("End of Download Ready", cancellationToken);
+        if (Enumerable.Range(1, (int)dr.ChunkCount).Sum() != remoteChunks.Sum(c => c.ChunkSequence))
+        {
+            appContext.Logger?.LogError("Inconsistent chunk sequence list from {SourceThumbprint} for ticket {Ticket}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), dr.Ticket);
+            return true;
+        }
+
+        ClientChunks.AddOrUpdate(dr.Ticket, (_) => [.. remoteChunks], (_, _) => [.. remoteChunks]);
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Download ready '{dr.File}': Use ticket {dr.Ticket} to retrieve {dr.ChunkCount} chunks.  Total file size {dr.Size}");
+        foreach (var chunk in dr.Chunks)
+            sb.AppendLine($"Chunk#{chunk.Seq}: {chunk.Size} bytes, hash={DisplayUtils.BytesToHex(chunk.Hash)[..16]}...");
+        sb.AppendLine("End of Download Ready");
+        await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
         return true;
     }
 
+    public async Task<bool> HandleChunkResponse(IRequestContext requestContext, ChunkResponse cr, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestContext);
+        ArgumentNullException.ThrowIfNull(cr);
+
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        using var scope = appContext.Logger?.BeginScope(nameof(HandleChunkResponse));
+
+        await appContext.SendConsoleMessage(Encoding.UTF8.GetString([.. cr.Payload]), cancellationToken);
+        throw new NotSupportedException();
+    }
     public async Task<bool> HandleUserInput(string input, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
@@ -373,7 +481,7 @@ public class FileClientApp : IClientApp
 
             default:
                 // Maybe it's a command this client app loaded?
-                var appCommand = ca.Commands.FirstOrDefault(cc => 
+                var appCommand = ca.Commands.FirstOrDefault(cc =>
                     string.Compare(cc.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0
                     || cc.InteractiveAliases.Any(a => string.Compare(a, command, StringComparison.InvariantCultureIgnoreCase) == 0));
                 if (appCommand != null)
@@ -389,5 +497,9 @@ public class FileClientApp : IClientApp
         }
     }
 
-    public Task OnDeactivate(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task OnDeactivate(CancellationToken cancellationToken)
+    {
+
+        return Task.CompletedTask;
+    }
 }

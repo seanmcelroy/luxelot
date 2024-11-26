@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2 - 2024-11-25
+
+### Changed
+
+- Completed implementation of `fsprepare` command
+
+### Added
+
+- Added `fsdownload` command, partially implemented to download files up to 1 chunk (1MB)
+
 ## 1.1 - 2024-11-24
 
 ### Changed

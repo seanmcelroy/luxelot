@@ -28,6 +28,11 @@ public class FserveApp : IServerApp
 
     private readonly ConcurrentDictionary<string, ClientConnection> ClientConnections = [];
 
+    /// <summary>
+    /// Chunks waiting to be downloaded, keyed by the download 'ticket' and the chunks as the key.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, (ChunkInfo chunkInfo, string chunkFileName)[]> ServerChunks = [];
+
     private static uint RecursiveCount(TreeNode t) => t.Children == null ? 0 : (t.Count + (uint)t.Children.Sum(t2 => RecursiveCount(t2.Value)));
     private static uint RecursiveSize(TreeNode t) => t.Children == null ? 0 : (t.Size + (uint)t.Children.Sum(t2 => RecursiveSize(t2.Value)));
 
@@ -81,6 +86,8 @@ public class FserveApp : IServerApp
                         return await HandleChangeDirectoryRequest(requestContext, cdr, cancellationToken);
                     else if (innerMessage is PrepareDownload pd)
                         return await HandlePrepareDownload(requestContext, pd, cancellationToken);
+                    else if (innerMessage is ChunkRequest cr)
+                        return await HandleGetChunk(requestContext, cr, cancellationToken);
                     else
                     {
                         appContext?.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Unsupported client frame type: {FrameType}", requestContext.PeerShortName, requestContext.RemoteEndPoint, innerMessage.GetType().FullName);
@@ -114,6 +121,8 @@ public class FserveApp : IServerApp
                         return await fileClientApp.HandleListResponse(requestContext, lr, cancellationToken);
                     else if (innerMessage is DownloadReady dr)
                         return await fileClientApp.HandleDownloadReady(requestContext, dr, cancellationToken);
+                    else if (innerMessage is ChunkResponse cr)
+                        return await fileClientApp.HandleChunkResponse(requestContext, cr, cancellationToken);
                     else
                     {
                         appContext?.Logger?.LogError("From {PeerShortName} ({RemoteEndPoint}): Unsupported server frame type {PayloadType}", requestContext.PeerShortName, requestContext.RemoteEndPoint, innerMessage.GetType().FullName);
@@ -138,6 +147,21 @@ public class FserveApp : IServerApp
             c.OnInitialize(appContext);
             return c;
         });
+
+        // Clear old tickets
+        var tempDir = Path.GetTempPath();
+        foreach (var dir in Directory.GetDirectories(tempDir, "luxelot-fs-*"))
+        {
+            try
+            {
+                Directory.Delete(dir, true);
+                appContext.Logger?.LogDebug("Deleted old ticket directory: {Directory}", dir);
+            }
+            catch (Exception ex)
+            {
+                appContext.Logger?.LogError(ex, "Unable to clear old ticket directory: {Directory}", dir);
+            }
+        }
 
         logicalRootNode = BuildLogicalDirectoryTree();
     }
@@ -622,10 +646,10 @@ public class FserveApp : IServerApp
         {
             // Absolute
             var fileDir = Path.GetDirectoryName(pd.File);
-            if (fileDir == null 
+            if (fileDir == null
                 || !virtualRoots.TryGetValue(fileDir, out TreeNode? virtFolder)
                 || virtFolder.Children == null
-                || !virtFolder.Children.TryGetValue(Path.Combine(virtFolder.AbsolutePath, Path.GetFileName(pd.File)), out TreeNode? virtFile)           
+                || !virtFolder.Children.TryGetValue(Path.Combine(virtFolder.AbsolutePath, Path.GetFileName(pd.File)), out TreeNode? virtFile)
                 )
             {
                 return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
@@ -681,6 +705,7 @@ public class FserveApp : IServerApp
 
         var fi = new FileInfo(fileTreeNode.AbsolutePath);
         var ticket = $"luxelot-fs-{requestContext.PeerShortName}-{Guid.NewGuid()}";
+        var fileHash = await SHA256.HashDataAsync(File.Open(fileTreeNode.AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read), cancellationToken);
 
         var tempDir = Path.GetTempPath();
         var ticketDir = Path.Combine(tempDir, ticket);
@@ -691,15 +716,16 @@ public class FserveApp : IServerApp
         using var buff = new BufferedStream(fsFile);
         using var brFile = new BinaryReader(buff);
         byte[] chunkBuffer = new byte[1024 * 1024];
-        var chunkDict = new Dictionary<int, (string chunkFileName, uint size, byte[] hash)>();
+
+        var localChunks = new List<(ChunkInfo chunkInfo, string chunkFileName)>();
         var count = 0;
         do
         {
             count++;
-            var bytesRead = brFile.Read(chunkBuffer, 0, chunkBuffer.Length);
-            if (bytesRead == 0)
+            var chunkBytes = brFile.Read(chunkBuffer, 0, chunkBuffer.Length);
+            if (chunkBytes == 0)
                 break;
-            var chunkHash = SHA256.HashData(chunkBuffer.AsSpan(0, bytesRead));
+            var chunkHash = SHA256.HashData(chunkBuffer.AsSpan(0, chunkBytes)).ToImmutableArray();
 
             var chunkFilename = Path.GetTempFileName();
             var relocatedChunkFilename = Path.Combine(ticketDir, Path.GetFileName(chunkFilename));
@@ -708,8 +734,21 @@ public class FserveApp : IServerApp
 
             using var fsChunk = new FileStream(chunkFilename, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
             using var bwChunk = new BinaryWriter(fsChunk);
-            bwChunk.Write(chunkBuffer.AsSpan(0, bytesRead)); // No additional encryption since we're going over our E2EE.
-            chunkDict.Add(count, (chunkFilename, (uint)bytesRead, chunkHash));
+            bwChunk.Write(chunkBuffer.AsSpan(0, chunkBytes)); // No additional encryption since we're going over our E2EE.
+
+            localChunks.Add((
+                new ChunkInfo
+                {
+                    ServerThumbprint = appContext.IdentityKeyPublicThumbprint, // It's always myself.
+                    FileName = fileTreeNode.RelativePath,
+                    DownloadTicket = ticket,
+                    FileSize = fileTreeNode.Size,
+                    FileHash = [.. fileHash],
+                    ChunkSequence = (uint)count,
+                    ChunkSize = (uint)chunkBytes,
+                    ChunkHash = chunkHash
+                },
+                chunkFilename));
         } while (!cancellationToken.IsCancellationRequested);
 
         var resp = new DownloadReady
@@ -717,22 +756,84 @@ public class FserveApp : IServerApp
             File = fileTreeNode.RelativePath,
             Ticket = ticket,
             Size = fileTreeNode.Size,
+            Hash = ByteString.CopyFrom(fileHash),
             IsEncrypted = true,
             IsDirectUdp = false,
-            ChunkCount = (uint)chunkDict.Count
+            ChunkCount = (uint)localChunks.Count
         };
 
-        foreach (var d in chunkDict)
-            resp.Chunks.Add(new Chunk
-            {
-                Seq = (uint)d.Key,
-                Size = d.Value.size,
-                Hash = ByteString.CopyFrom(d.Value.hash)
-            });
+        resp.Chunks.AddRange(localChunks.Select(c => new Chunk
+        {
+            Seq = c.chunkInfo.ChunkSequence,
+            Size = c.chunkInfo.ChunkSize,
+            Hash = ByteString.CopyFrom([.. c.chunkInfo.ChunkHash])
+        }));
+
+        ServerChunks.TryAdd(ticket, [.. localChunks]);
+        appContext.Logger?.LogDebug("File {Filename} carved into {ChunkCount} chunks for peer {PeerShortName} with ticket {Ticket}", fileTreeNode.AbsolutePath, localChunks.Count, requestContext.PeerShortName, ticket);
 
         return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
             appContext,
             resp,
             cc.SessionSharedKey), cancellationToken);
     }
+
+    private async Task<bool> HandleGetChunk(IRequestContext requestContext, ChunkRequest cr, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestContext);
+        ArgumentNullException.ThrowIfNull(cr);
+
+        if (appContext == null)
+            throw new InvalidOperationException("App is not initialized");
+
+        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
+        {
+            appContext.Logger?.LogDebug("GetChunk received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            return true;
+        }
+
+        appContext.Logger?.LogDebug("GetChunk from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+
+        if (!ServerChunks.TryGetValue(cr.DownloadTicket, out (ChunkInfo chunkInfo, string chunkFileName)[]? chunks))
+        {
+            appContext.Logger?.LogDebug("Get chunk from {SourceThumbprint} referenced unknown download ticket {Ticket}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), cr.DownloadTicket);
+            return true;
+        }
+
+        if (cr.ChunkSeq < 1 || cr.ChunkSeq > chunks.Length)
+        {
+            appContext.Logger?.LogDebug("Get chunk from {SourceThumbprint} for ticket {Ticket} referenced invalid chunk sequence {Sequence}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), cr.DownloadTicket, cr.ChunkSeq);
+            return true;
+        }
+
+        var (chunkInfo, chunkFileName) = chunks[cr.ChunkSeq - 1];
+
+        if (!File.Exists(chunkFileName))
+        {
+            return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                appContext,
+                new Status
+                {
+                    Operation = Operation.GetChunk,
+                    StatusCode = 404,
+                    StatusMessage = $"Chunk {chunkInfo.ChunkSequence}/{chunks.Length} ({chunkInfo.ChunkSize} bytes) for {chunkInfo.FileName} not found on fserve",
+                    ResultPayload = ByteString.Empty
+                },
+                cc.SessionSharedKey), cancellationToken);
+        }
+
+        var payload = await File.ReadAllBytesAsync(chunkFileName, cancellationToken);
+
+        return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+            appContext,
+            new ChunkResponse
+            {
+                DownloadTicket = cr.DownloadTicket,
+                ChunkSeq = chunkInfo.ChunkSequence,
+                Payload = ByteString.CopyFrom(payload),
+            },
+            cc.SessionSharedKey), cancellationToken);
+    }
+
 }
