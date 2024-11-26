@@ -302,6 +302,11 @@ public class FserveApp : IServerApp
             if (actualPath.EndsWith(Path.DirectorySeparatorChar))
                 actualPath = actualPath[..^1];
 
+            if (!Directory.Exists(actualPath)) {
+                appContext?.Logger?.LogWarning("Logical mount path '{LogicalPath}' does not exist.  Skipping.", actualPath);
+                continue;
+            }
+
             var mountRoot = BuildTreeNode(virtualMountPoint, actualPath, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots, mountsConfig.HideEmptyDirectories);
             if (mountRoot != null)
                 logicalMounts.Add(actualPath, mountRoot);

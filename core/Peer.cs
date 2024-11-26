@@ -84,9 +84,9 @@ internal class Peer : IDisposable
         {
             await peerTcpClient.ConnectAsync(endPoint, cancellationToken);
         }
-        catch (SocketException sex)
+        catch (SocketException sx)
         {
-            logger?.LogError(sex, "Unable to connect to {RemoteEndPoint}", endPoint);
+            logger?.LogError(sx, "Unable to connect to {RemoteEndPoint}: {ErrorCode}", endPoint, sx.ErrorCode);
             return null;
         }
 

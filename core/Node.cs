@@ -289,6 +289,7 @@ public class Node
                     switch (t.Value.Status)
                     {
                         case TaskStatus.WaitingForActivation:
+                        case TaskStatus.WaitingToRun:
                         case TaskStatus.Running:
                             {
                                 // Fine.
@@ -402,7 +403,16 @@ public class Node
         try
         {
             using TcpListener user_listener = new(IPAddress.Loopback, UserPort);
-            user_listener.Start();
+            try
+            {
+                user_listener.Start();
+            }
+            catch (SocketException sx)
+            {
+                context.Logger?.LogError(sx, "Unable to start user listener on {LocalEndPoint}: Socket error {ErrorCodeName} ({ErrorCode})", user_listener.LocalEndpoint, System.Enum.GetName((SocketError)sx.ErrorCode), sx.ErrorCode);
+                throw;
+            }
+
             Logger?.LogInformation("Listening for local user commands at {LocalEndpoint}", user_listener.LocalEndpoint);
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -458,6 +468,7 @@ public class Node
                         }
                         catch (ObjectDisposedException)
                         {
+                            // Swallow exception
                             User = null;
                             continue;
                         }
@@ -488,7 +499,16 @@ public class Node
         try
         {
             using TcpListener peer_listener = new(ListenAddress, PeerPort);
-            peer_listener.Start();
+            try
+            {
+                peer_listener.Start();
+            }
+            catch (SocketException sx)
+            {
+                context.Logger?.LogError(sx, "Unable to start peer listener on {LocalEndPoint}: {ErrorCodeName} ({ErrorCode})", peer_listener.LocalEndpoint, System.Enum.GetName((SocketError)sx.ErrorCode), sx.ErrorCode);
+                throw;
+            }
+
             Logger?.LogInformation("Listening for peers at {LocalEndpoint}", peer_listener.LocalEndpoint);
             while (!cancellationToken.IsCancellationRequested)
             {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4 - 2024-11-26
+
+### Changed
+
+- Improved error handling for cross-platform execution
+- Changed peer ports in default settings file to IANA unassigned range 9763-9799
+
 ## 1.3 - 2024-11-25
 
 ### Changed
