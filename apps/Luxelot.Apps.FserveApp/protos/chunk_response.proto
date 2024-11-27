@@ -6,5 +6,6 @@ message ChunkResponse
  {
     string download_ticket = 1;
     uint32 chunk_seq = 2;
-    bytes payload = 3;
+    uint32 chunk_size = 3;
+    bytes payload = 4;
 }

@@ -11,10 +11,10 @@ public readonly record struct ChunkInfo
     public required string DownloadTicket { get; init; }
     public required ulong FileSize { get; init; }
     public required ImmutableArray<byte> FileHash { get; init; }
+    public required uint ChunkCount { get; init; }
 
     // Chunk Info
     public required uint ChunkSequence { get; init; }
     public required uint ChunkSize { get; init; }
     public required ImmutableArray<byte> ChunkHash { get; init; }
-
 }

@@ -135,7 +135,6 @@ public static class CryptoUtils
 
     public static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey, ILogger? logger)
     {
-        ArgumentNullException.ThrowIfNull(publicKey);
         var secretKeyWithEncapsulationSender = GenerateChrystalsKyberEncryptionKey(publicKey, logger);
 
         // Shared Key
@@ -149,8 +148,6 @@ public static class CryptoUtils
 
     private static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ImmutableArray<byte> publicKeyBytes, ILogger? logger)
     {
-        ArgumentNullException.ThrowIfNull(publicKeyBytes);
-
         KyberPublicKeyParameters publicKey = new(KyberParameters.kyber1024, [.. publicKeyBytes]);
         ISecretWithEncapsulation secret_with_encapsulation;
 
@@ -185,9 +182,6 @@ public static class CryptoUtils
 
     public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
     {
-        ArgumentNullException.ThrowIfNull(privateKeyBytes);
-        ArgumentNullException.ThrowIfNull(encapsulatedKey);
-
         var privateKey = new KyberPrivateKeyParameters(KyberParameters.kyber1024, [.. privateKeyBytes]);
         return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey, logger);
     }
@@ -195,7 +189,6 @@ public static class CryptoUtils
     public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(privateKey);
-        ArgumentNullException.ThrowIfNull(encapsulatedKey);
 
         byte[] key_bytes;
 

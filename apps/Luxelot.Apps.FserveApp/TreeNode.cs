@@ -14,7 +14,7 @@ public class TreeNode
         Size = uint.MaxValue,
         DescendentSize = uint.MaxValue,
         Children = null,
-        LastModified = null
+        LastModified = DateTimeOffset.UtcNow
     };
 
     public required string RelativeName { get; init; }

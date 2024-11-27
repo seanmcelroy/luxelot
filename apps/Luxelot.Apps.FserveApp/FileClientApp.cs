@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Data;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
 using Luxelot.Apps.Common;
@@ -39,6 +40,11 @@ public class FileClientApp : IClientApp
     /// Chunks available to be downloaded, keyed by the download 'ticket' and the chunks as the key.
     /// </summary>
     private readonly ConcurrentDictionary<string, ChunkInfo[]> ClientChunks = [];
+
+    /// <summary>
+    /// Chunks that have been downlaoded, keyed by (download ticket, chunk seq) with the file as the value.
+    /// </summary>
+    private readonly ConcurrentDictionary<(string, uint), FileInfo> ChunkDownloads = [];
 
     private (string ticket, uint index)? currentChunkGet = null;
 
@@ -109,7 +115,6 @@ public class FileClientApp : IClientApp
 
     public async Task<bool> SendAuthChannelBegin(ImmutableArray<byte> destinationThumbprint, string username, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(destinationThumbprint);
         ArgumentException.ThrowIfNullOrWhiteSpace(username);
 
         if (appContext == null)
@@ -360,10 +365,14 @@ public class FileClientApp : IClientApp
         appContext.Logger?.LogInformation("Received from {SourceThumbprint}: {StatusCode} {StatusMessage}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), listResponse.StatusCode, listResponse.StatusMessage);
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Listing for '{listResponse.Directory}':    {listResponse.StatusCode}");
-        foreach (var result in listResponse.Results)
+        sb.AppendLine($"Listing for '{listResponse.Directory}': {listResponse.StatusCode}");
+        if (listResponse.Results.Count > 0)
         {
-            sb.AppendLine($"{result.Name} {result.Size}");
+            var size_len = listResponse.Results.Max(r => r.Size.ToString().Length);
+            foreach (var result in listResponse.Results)
+            {
+                sb.AppendFormat("{0:MMM dd HH:mm} {1} {2}\r\n", result.Modified.ToDateTimeOffset(), result.Size.ToString().PadLeft(size_len), result.Name);
+            }
         }
         sb.AppendLine("End of List");
         await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
@@ -402,6 +411,7 @@ public class FileClientApp : IClientApp
                 DownloadTicket = dr.Ticket,
                 FileSize = dr.Size,
                 FileHash = [.. dr.Hash],
+                ChunkCount = dr.ChunkCount,
                 ChunkSequence = chunk.Seq,
                 ChunkSize = (uint)chunk.Size,
                 ChunkHash = [.. chunk.Hash]
@@ -441,8 +451,182 @@ public class FileClientApp : IClientApp
 
         using var scope = appContext.Logger?.BeginScope(nameof(HandleChunkResponse));
 
-        await appContext.SendConsoleMessage(Encoding.UTF8.GetString([.. cr.Payload]), cancellationToken);
-        throw new NotSupportedException();
+        if (ServerThumbprint == null || SessionSharedKey == null)
+        {
+            appContext.Logger?.LogInformation("Prepare download failed, no connection to a server");
+            await appContext.SendConsoleMessage($"Not connected to an fserve.", cancellationToken);
+            return false;
+        }
+
+        // Were we expecting this chunk?
+        var clientKvp = ClientChunks.FirstOrDefault(cc =>
+            string.CompareOrdinal(cc.Key, cr.DownloadTicket) == 0
+            && cc.Value.SingleOrDefault(c => c.ChunkSequence == cr.ChunkSeq && c.ChunkSize == cr.ChunkSize) != default);
+
+        if (clientKvp.Equals(default(KeyValuePair<string, ChunkInfo[]>)))
+        {
+            appContext.Logger?.LogError("No client chunk profiled for ticket {Ticket} seq {ChunkSequence}. Ignoring.", cr.DownloadTicket, cr.ChunkSeq);
+            return true;
+        }
+
+        // Get the chunk entry, with a concurrency check
+        var clientChunk = clientKvp.Value.SingleOrDefault(c => c.ChunkSequence == cr.ChunkSeq
+            && c.ChunkSize == cr.ChunkSize);
+        if (clientChunk == default)
+        {
+            appContext.Logger?.LogError("No client chunk profiled for ticket {Ticket} seq {ChunkSequence}. Ignoring.", cr.DownloadTicket, cr.ChunkSeq);
+            return true;
+        }
+
+        // Have we already downloaded it?
+        if (ChunkDownloads.TryGetValue((cr.DownloadTicket, cr.ChunkSeq), out FileInfo? chunkFileInfo)
+            && chunkFileInfo.Exists)
+        {
+            appContext.Logger?.LogError("Chunk already downloaded for ticket {Ticket} seq {ChunkSequence} at '{Path}'. Ignoring.", cr.DownloadTicket, cr.ChunkSeq, chunkFileInfo.FullName);
+            return true;
+        }
+
+        // Does the chunk size and hash match?
+        {
+            if (cr.Payload.Span.Length != clientChunk.ChunkSize)
+            {
+                appContext.Logger?.LogError("Chunk size does not match for ticket {Ticket} seq {ChunkSequence} (downloaded {ChunkSizeActual} but expected {ChunkSizeExpected}). Ignoring.", cr.DownloadTicket, cr.ChunkSeq, cr.Payload.Span.Length, clientChunk.ChunkSize);
+                return true;
+            }
+
+            byte[] chunkHash = new byte[32];
+            if (!SHA256.TryHashData(cr.Payload.Span, chunkHash, out _))
+            {
+                appContext.Logger?.LogError("Unable to hash chunk for ticket {Ticket} seq {ChunkSequence}. Ignoring.", cr.DownloadTicket, cr.ChunkSeq);
+                return true;
+            }
+            if (!Enumerable.SequenceEqual(
+                clientChunk.ChunkHash,
+                chunkHash))
+            {
+                appContext.Logger?.LogError("Chunk hash does not match for ticket {Ticket} seq {ChunkSequence}. Ignoring.", cr.DownloadTicket, cr.ChunkSeq);
+                return true;
+            }
+        }
+
+        // Save chunk
+        var chunkFilename = Path.GetTempFileName();
+        chunkFileInfo = new FileInfo(chunkFilename);
+        await File.WriteAllBytesAsync(chunkFilename, cr.Payload.ToByteArray(), cancellationToken);
+        ChunkDownloads.TryAdd((cr.DownloadTicket, cr.ChunkSeq), chunkFileInfo);
+        await appContext.SendConsoleMessage($"Downloaded chunk {cr.ChunkSeq}/{clientChunk.ChunkCount} ({cr.ChunkSize} bytes)", cancellationToken);
+
+        // Is that the final chunk?
+        if (ChunkDownloads.Keys.Count(cd => string.CompareOrdinal(cd.Item1, cr.DownloadTicket) == 0)
+            == clientChunk.ChunkCount)
+        {
+            // Reassemble all chunks into the file.
+            var reassembledFilename = Path.GetTempFileName();
+            using (var fs = File.OpenWrite(reassembledFilename))
+            {
+                for (uint i = 1; i <= clientChunk.ChunkCount; i++)
+                {
+                    if (!ChunkDownloads.TryGetValue((cr.DownloadTicket, i), out FileInfo? chunkFi))
+                    {
+                        appContext.Logger?.LogError("Chunk metadata inconsistent in memory for ticket {Ticket} seq {ChunkSequence}. Ignoring.", cr.DownloadTicket, cr.ChunkSeq);
+                        return true;
+                    }
+
+                    var chunkBytes = await File.ReadAllBytesAsync(chunkFi.FullName, cancellationToken);
+                    await fs.WriteAsync(chunkBytes, cancellationToken);
+                }
+            }
+
+            // Validate total file hash
+            var fileOk = true;
+            {
+                var fiReassembled = new FileInfo(reassembledFilename);
+                if (fiReassembled.Exists && (ulong)fiReassembled.Length != clientChunk.FileSize)
+                {
+                    fileOk = false;
+                    appContext.Logger?.LogError("File size does not match for ticket {Ticket} (downloaded {FileSizeActual} but expected {FileSizeExpected}). Ignoring.", cr.DownloadTicket, fiReassembled.Length, clientChunk.FileSize);
+                    if (fiReassembled.Exists)
+                        fiReassembled.Delete();
+                    // Don't return.. go through clean-up.
+                }
+            }
+
+            if (fileOk)
+            {
+                using (var fs = File.OpenRead(reassembledFilename))
+                {
+                    byte[] fileHash = new byte[32];
+                    await SHA256.HashDataAsync(fs, fileHash, cancellationToken);
+                    if (!Enumerable.SequenceEqual(
+                        clientChunk.FileHash,
+                        fileHash))
+                    {
+                        fileOk = false;
+                        appContext.Logger?.LogError("File hash does not match for ticket {Ticket}. Ignoring.", cr.DownloadTicket);
+                        fs.Close();
+                        File.Delete(reassembledFilename);
+                        // Don't return.. go through clean-up.
+                    }
+                }
+            }
+
+            string destinationPath = string.Empty;
+            if (fileOk)
+            {
+                var destinationFileName = Path.GetFileName(clientKvp.Value[0].FileName);
+                if (!appContext.TryGetStateValue(ChangeLocalDirectoryCommand.LOCAL_WORKING_DIRECTORY, out string? lcd))
+                {
+                    lcd = ChangeLocalDirectoryCommand.GetDefaultDownloadDirectory();
+                }
+                destinationPath = Path.Combine(lcd!, destinationFileName);
+                while (File.Exists(destinationPath))
+                {
+                    var directoryName = Path.GetDirectoryName(destinationPath)!;
+                    var fileName = Path.GetFileNameWithoutExtension(destinationPath)!;
+                    var ext = Path.GetExtension(destinationPath);
+                    destinationPath = Path.Combine(directoryName, $"{fileName} copy{ext}");
+                }
+                File.Move(reassembledFilename, destinationPath);
+            }
+
+            // Clear from the 'ready to download' list
+            if (!ClientChunks.TryRemove(clientKvp))
+            {
+                // Concurrency check
+                appContext.Logger?.LogError("No client chunk currently profiled for ticket {Ticket} seq {ChunkSequence}. Ignoring.", cr.DownloadTicket, cr.ChunkSeq);
+                return true;
+            }
+
+            // Clear chunk downloads
+            for (uint i = 1; i <= clientChunk.ChunkCount; i++)
+            {
+                if (ChunkDownloads.TryGetValue((cr.DownloadTicket, i), out FileInfo? chunkFi))
+                {
+                    if (chunkFi.Exists)
+                        chunkFi.Delete();
+                    _ = ChunkDownloads.Remove((cr.DownloadTicket, i), out _);
+                }
+            }
+
+            if (fileOk)
+            {
+                await appContext.SendConsoleMessage($"Downloaded file to '{destinationPath}'", cancellationToken);
+                return true;
+            }
+        }
+
+        // Not the final chunk
+        var frame = FrameUtils.WrapClientFrame(
+            appContext,
+            new ChunkRequest
+            {
+                DownloadTicket = cr.DownloadTicket,
+                ChunkSeq = cr.ChunkSeq + 1,
+            },
+            SessionSharedKey.Value);
+
+        await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken);
+        return true;
     }
     public async Task<bool> HandleUserInput(string input, CancellationToken cancellationToken)
     {
@@ -466,17 +650,18 @@ public class FileClientApp : IClientApp
         {
             case "?":
             case "help":
-                sb.AppendLine($"\r\n{InteractiveCommand}> Command List");
+                sb.AppendLine($"\r\n{InteractiveCommand}> COMMAND LIST");
                 var built_in_cmds = new string[] { "version", "exit" };
-                var loaded_cmds = ca.Commands.Select(c => c.InteractiveCommand);
+                var cmd_len = built_in_cmds.Union(ca.Commands.Select(c => c.InteractiveCommand)).Max(c => c.Length);
+                var loaded_cmds = ca.Commands.Select(c => $"{c.InteractiveCommand.PadRight(cmd_len)}: {c.ShortHelp}");
                 sb.AppendLine($"{InteractiveCommand}> {built_in_cmds.Union(loaded_cmds).Order().Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}")}");
-                sb.AppendLine($"{InteractiveCommand}> End of Command List");
+                sb.AppendLine($"{InteractiveCommand}> END OF COMMAND LIST").AppendLine();
                 await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
                 return true;
 
             case "version":
                 var version = Assembly.GetExecutingAssembly().GetName().Version;
-                await appContext.SendConsoleMessage($"{Name} v{version}", cancellationToken);
+                await appContext.SendConsoleMessage($"{Name} app v{version}", cancellationToken);
                 return true;
 
             default:
@@ -492,7 +677,7 @@ public class FileClientApp : IClientApp
                     await appContext.SendConsoleMessage($"ERROR: {appCommand.FullCommand}", cancellationToken);
                 }
                 else
-                    await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command {command}. Type 'exit' to exit this app.", cancellationToken);
+                    await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command '{command.Trim()}'. Type 'exit' to exit this app.", cancellationToken);
                 return false;
         }
     }

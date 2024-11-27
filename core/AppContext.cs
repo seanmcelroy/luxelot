@@ -13,6 +13,7 @@ namespace Luxelot;
 public class AppContext : IAppContext
 {
     private readonly ConcurrentDictionary<Type, object> Singletons = [];
+    private readonly ConcurrentDictionary<string, object> State = [];
 
     public ImmutableArray<byte> IdentityKeyPublicBytes => Node.IdentityKeyPublicBytes;
     public ImmutableArray<byte> IdentityKeyPublicThumbprint => Node.IdentityKeyPublicThumbprint;
@@ -20,6 +21,7 @@ public class AppContext : IAppContext
     public required ILogger? Logger { get; init; }
 
     public required Node Node { private get; init; }
+
 
     public ImmutableArray<byte>? FindPeerThumbprintByShortName(string shortName) => Node.FindPeerThumbprintByShortName(shortName);
 
@@ -33,7 +35,6 @@ public class AppContext : IAppContext
         IMessage message,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(message);
 
         if (ultimateDestinationThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
@@ -78,8 +79,6 @@ public class AppContext : IAppContext
         IMessage message,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(routingPeerThumbprint);
-        ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(message);
 
         if (routingPeerThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
@@ -122,7 +121,6 @@ public class AppContext : IAppContext
 
     public bool TryAddDhtEntry(ImmutableArray<byte> key, IBucketEntryValue value)
     {
-        ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(value);
 
         // Don't add loopback
@@ -148,7 +146,6 @@ public class AppContext : IAppContext
     public Envelope EncryptEnvelope(byte[] envelope_payload_bytes, ImmutableArray<byte> sessionSharedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(envelope_payload_bytes);
-        ArgumentNullException.ThrowIfNull(sessionSharedKey);
 
         return CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, sessionSharedKey, logger);
     }
@@ -156,7 +153,6 @@ public class AppContext : IAppContext
     public byte[]? DecryptEnvelope(Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(envelope);
-        ArgumentNullException.ThrowIfNull(sessionSharedKey);
 
         return CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
     }
@@ -164,4 +160,17 @@ public class AppContext : IAppContext
     public async Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken) => await Node.EnterAppInteractiveMode(clientAppName, cancellationToken);
 
     public async Task<bool> ExitAppInteractiveMode(string clientAppName, CancellationToken cancellationToken) => await Node.ExitAppInteractiveMode(clientAppName, cancellationToken);
+
+    public bool TryGetStateValue<T>(string key, [MaybeNullWhen(false)] out T? value)
+    {
+        var result = State.TryGetValue(key, out object? value2);
+        value = (T?)value2;
+        return result;
+    }
+
+    public bool TryAddState(string key, [MaybeNullWhen(false)] object value) => State.TryAdd(key, value);
+
+    public bool TryRemove(string key, [MaybeNullWhen(false)] out object value) => State.TryRemove(key, out value);
+
+    public void AddOrUpdate(string key, object value) => _ = State.AddOrUpdate(key, value, (_, _) => value);
 }

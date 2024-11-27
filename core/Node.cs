@@ -566,7 +566,7 @@ public class Node
                             );
                     var peer_state = peer_tcp_info != null ? peer_tcp_info.State : TcpState.Unknown;
                     if (peer_state != TcpState.Established || !peer.IsWriteable)
-                        Tasks.TryAdd(new TaskEntry { Name = $"Shutdown dead peer {peer.RemoteEndPoint}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                        Tasks.TryAdd(new TaskEntry { Name = $"Shutdown dead peer {peer.ShortName} {peer.RemoteEndPoint} (state={System.Enum.GetName(peer_state)})", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
                 }
             }
         }
@@ -735,14 +735,16 @@ public class Node
             case "help":
                 {
                     var sb = new StringBuilder();
-                    sb.AppendLine("\r\nBuilt-In Command List");
+                    sb.AppendLine()
+                        .AppendLine("COMMAND LIST")
+                        .AppendLine("Built-In Commands:");
                     var built_in_cmds = new string[] { "dht", "disconnect", "connect", "node", "peers", "quit", "shutdown", "version" };
                     sb.AppendLine(built_in_cmds
                         .Order()
-                        .Aggregate((c, n) => $"{c}\r\n{n}"));
+                        .Aggregate((c, n) => $"{c}{Environment.NewLine}{n}"));
 
                     if (ClientApps.Count > 0)
-                        sb.AppendLine("\r\nLoaded apps:");
+                        sb.AppendLine().AppendLine("Commands from loaded apps:");
                     foreach (var ca in ClientApps.OrderBy(x => x.InteractiveCommand ?? x.Name))
                     {
                         if (ca.InteractiveCommand != null)
@@ -750,10 +752,12 @@ public class Node
                         else
                             sb.AppendLine($"{ca.Name}");
 
+                        var full_len = ca.Commands.Max(com => com.FullCommand.Length);
+
                         foreach (var com in ca.Commands.OrderBy(x => x.FullCommand))
-                            sb.AppendLine($"\t{com.FullCommand}: {com.ShortHelp}");
+                            sb.AppendLine($"     {com.FullCommand.PadRight(full_len)}: {com.ShortHelp}");
                     }
-                    sb.AppendLine("\r\nEnd of Command List");
+                    sb.AppendLine().AppendLine("END OF COMMAND LIST").AppendLine();
                     await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
                     break;
                 }
@@ -764,7 +768,7 @@ public class Node
 
             case "apps":
                 {
-                    await context.WriteLineToUserAsync("\r\nApps List", cancellationToken);
+                    await context.WriteLineToUserAsync($"{Environment.NewLine}Apps List", cancellationToken);
                     foreach (var app in ServerApps.Order())
                     {
                         await context.WriteLineToUserAsync($"{app.Name}", cancellationToken);
@@ -920,7 +924,6 @@ public class Node
         ImmutableArray<byte> ultimateDestinationThumbprint,
         IMessage innerPayload)
     {
-        ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(innerPayload);
 
         if (routingPeerThumbprint != null && routingPeerThumbprint.Value.Length != Apps.Common.Constants.THUMBPRINT_LEN)
@@ -972,7 +975,6 @@ public class Node
 
     private DirectedMessage PrepareDirectedMessage(ImmutableArray<byte> destinationIdPubKeyThumbprint, IMessage payload)
     {
-        ArgumentNullException.ThrowIfNull(destinationIdPubKeyThumbprint);
         ArgumentNullException.ThrowIfNull(payload);
 
         if (destinationIdPubKeyThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
@@ -1045,7 +1047,7 @@ public class Node
         ArgumentNullException.ThrowIfNull(original);
         ArgumentNullException.ThrowIfNull(logger);
 
-        foreach (var peer in Peers.Values.Where(p => !p.IsLoopback))
+        foreach (var peer in Peers.Values.Where(p => !p.IsLoopback && p.State == PeerState.ESTABLISHED))
         {
             var envelope = peer.PrepareEnvelope(original, logger);
             await peer.SendEnvelope(envelope, logger, cancellationToken);
@@ -1117,7 +1119,6 @@ public class Node
 
     public bool TryAddDhtEntry(ImmutableArray<byte> key, IBucketEntryValue value)
     {
-        ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(value);
 
         // Don't add loopback
@@ -1129,8 +1130,6 @@ public class Node
 
     public bool TryGetDhtEntry(ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value)
     {
-        ArgumentNullException.ThrowIfNull(key);
-
         // Don't add loopback
         if (key.All(b => b == 0x00))
         {

@@ -9,6 +9,7 @@ using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using Luxelot.Apps.Common.DHT;
+using System.Runtime.Intrinsics.Arm;
 
 namespace Luxelot;
 
@@ -105,8 +106,6 @@ internal class Peer : IDisposable
         NodeContext nodeContext,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(nodeContext);
-
         if (!IsLoopback)
             ObjectDisposedException.ThrowIf(disposed, Client!);
 
@@ -114,22 +113,22 @@ internal class Peer : IDisposable
             return true; // We don't need to shut it down, we just don't need to do anything here.
 
         // Fully established with data to read.
-        var buffer = new byte[1024 * 1024 + 1024]; // 1MB + 1kb
+        byte[] buffer;
         int size;
+        var stream = Stream!;
+
         try
         {
-            size = await Stream!.ReadAtLeastAsync(buffer, 1, throwOnEndOfStream: false, cancellationToken: cancellationToken);
-            if (size == 0)
-            {
-                if (IsLoopback)
-                    return true;
-                else
-                {
-                    nodeContext.Logger?.LogWarning("End of stream from peer {PeerShortName} ({RemoteEndPoint}) could be processed. Closing.", ShortName, RemoteEndPoint);
-                    Client?.Close();
-                    return false;
-                }
-            }
+            if (stream is NetworkStream ns) { if (!ns.DataAvailable) return true; }
+            if (stream is LoopbackStream ls) { if (!ls.DataAvailable) return true; }
+
+            // First, read how big this envelope is.
+            var envelope_len_buffer = new byte[4];
+            await stream.ReadExactlyAsync(envelope_len_buffer, 0, 4, cancellationToken);
+            size = (int)BitConverter.ToUInt32(envelope_len_buffer);
+
+            buffer = new byte[size];
+            await stream.ReadExactlyAsync(buffer, 0, size, cancellationToken);
             BytesReceived += (ulong)size;
             LastActivity = DateTimeOffset.Now;
         }
@@ -398,8 +397,6 @@ internal class Peer : IDisposable
     {
         using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleSyn)} from {RemoteEndPoint}");
 
-        ArgumentNullException.ThrowIfNull(nodeContext);
-
         State = PeerState.SYN_RECEIVED;
 
         // We expect a Syn (with a public key).  Calculate the Kyber cipher text and send back an Ack.
@@ -504,7 +501,6 @@ internal class Peer : IDisposable
         try
         {
             await stream.ReadExactlyAsync(buffer, 0, size, cancellationToken: cancellationToken);
-            //var size2 = await stream.ReadAsync(buffer, cancellationToken: cancellationToken);
             BytesReceived += (ulong)size;
             LastActivity = DateTimeOffset.Now;
         }
@@ -579,8 +575,6 @@ internal class Peer : IDisposable
     {
         using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleMessage)} from {DisplayUtils.BytesToHex(sourceThumbprint)[..8]} ({RemoteEndPoint})");
 
-        ArgumentNullException.ThrowIfNull(nodeContext);
-        ArgumentNullException.ThrowIfNull(sourceThumbprint);
         ArgumentNullException.ThrowIfNull(message);
 
         if (sourceThumbprint.Length != Constants.THUMBPRINT_LEN)
@@ -701,8 +695,6 @@ internal class Peer : IDisposable
 
     public async Task SendSyn(NodeContext nodeContext, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(nodeContext);
-
         if (SessionPublicKey == null)
         {
             throw new InvalidOperationException("SessionPublicKey not set, but I am the one sending the syn!");
@@ -728,11 +720,16 @@ internal class Peer : IDisposable
         ArgumentNullException.ThrowIfNull(envelope);
 
         var bytes_to_send = envelope.ToByteArray();
+        uint bytes_len = (uint)bytes_to_send.Length;
+
         try
         {
+            // Send size of protobuf envelope that follows
+            await Stream!.WriteAsync(BitConverter.GetBytes(bytes_len), cancellationToken);
+            // Send protobuf envelope
             await Stream!.WriteAsync(bytes_to_send, cancellationToken);
             BytesSent += (ulong)bytes_to_send.Length;
-            logger?.LogTrace("SendEnvelope sent {BytesSent} bytes", bytes_to_send.Length);
+            logger?.LogTrace("SendEnvelope sent {BytesSent} bytes to {PeerShortName}", bytes_to_send.Length, ShortName);
             LastActivity = DateTimeOffset.Now;
             return true;
         }

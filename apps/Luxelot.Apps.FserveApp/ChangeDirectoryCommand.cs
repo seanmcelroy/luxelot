@@ -13,7 +13,7 @@ public class ChangeDirectoryCommand : IConsoleCommand
 
     public string[] InteractiveAliases => ["chdir"];
 
-    public string ShortHelp => "Changes the current directory to the one specified";
+    public string ShortHelp => "Changes the current directory on the server";
 
     public string Usage => "cd <DIRECTORY>";
 

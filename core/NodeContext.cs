@@ -24,8 +24,6 @@ public readonly struct NodeContext(Node node)
         ImmutableArray<byte> ultimateDestinationThumbprint,
         IMessage innerPayload)
     {
-        ArgumentNullException.ThrowIfNull(routingPeerThumbprint);
-        ArgumentNullException.ThrowIfNull(ultimateDestinationThumbprint);
         ArgumentNullException.ThrowIfNull(innerPayload);
 
         return _node.PrepareEnvelopePayload(routingPeerThumbprint, ultimateDestinationThumbprint, innerPayload);
@@ -35,8 +33,6 @@ public readonly struct NodeContext(Node node)
 
     internal void AdvisePeerPathToIdentity(Peer peer, ImmutableArray<byte> thumbprint) {
         ArgumentNullException.ThrowIfNull(peer);
-        ArgumentNullException.ThrowIfNull(thumbprint);
-
         _node.AdvisePeerPathToIdentity(peer, thumbprint);
     }
 

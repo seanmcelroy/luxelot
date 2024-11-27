@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Dynamic;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot;
@@ -20,6 +21,8 @@ public class LoopbackStream : Stream
 
     public override bool CanWrite => true;
 
+    public bool DataAvailable => _inner.Count > 0;
+
     public override long Length => throw new NotSupportedException();
 
     public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
@@ -39,7 +42,7 @@ public class LoopbackStream : Stream
     {
         if (_inner.IsEmpty)
             return 0;
-    beginning:
+        beginning:
         var sw = new Stopwatch();
         sw.Start();
         var okay = _innerMutex.WaitOne(ReadTimeout);
@@ -55,7 +58,6 @@ public class LoopbackStream : Stream
             _innerMutex.ReleaseMutex();
             Thread.Yield();
             goto beginning;
-            //return 0;
         }
 
         var bytesAvailable = peek.Length;

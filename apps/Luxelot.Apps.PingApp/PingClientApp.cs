@@ -77,10 +77,10 @@ public class PingClientApp : IClientApp
         {
             case "?":
             case "help":
-                sb.AppendLine($"\r\n{InteractiveCommand}> Command List");
+                sb.AppendLine($"{Environment.NewLine}{InteractiveCommand}> COMMAND LIST");
                 var built_in_cmds = new string[] { "version", "exit", "ping" };
-                sb.AppendLine($"{InteractiveCommand}> {built_in_cmds.Order().Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}")}");
-                sb.AppendLine($"{InteractiveCommand}> End of Command List");
+                sb.AppendLine($"{InteractiveCommand}> {built_in_cmds.Order().Aggregate((c, n) => $"{c}{Environment.NewLine}{InteractiveCommand}> {n}")}");
+                sb.AppendLine($"{InteractiveCommand}> END OF COMMAND LIST{Environment.NewLine}");
                 await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
                 return true;
 
@@ -95,7 +95,7 @@ public class PingClientApp : IClientApp
                 return await ping.Invoke(words, cancellationToken);
 
             default:
-                await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command {command}. Type 'exit' to exit this app.", cancellationToken);
+                await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command '{command.Trim()}'. Type 'exit' to exit this app.", cancellationToken);
                 return false;
         }
     }

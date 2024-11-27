@@ -48,4 +48,12 @@ public interface IAppContext
     public Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken);
 
     public Task<bool> ExitAppInteractiveMode(string clientAppName, CancellationToken cancellationToken);
+
+    public bool TryGetStateValue<T>(string key, [MaybeNullWhen(false)] out T? value);
+
+    public bool TryAddState(string key, [MaybeNullWhen(false)] object value);
+
+    public bool TryRemove(string key, [MaybeNullWhen(false)] out object value);
+
+    public void AddOrUpdate(string key, object value);
 }

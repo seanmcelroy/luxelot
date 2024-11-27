@@ -302,12 +302,13 @@ public class FserveApp : IServerApp
             if (actualPath.EndsWith(Path.DirectorySeparatorChar))
                 actualPath = actualPath[..^1];
 
-            if (!Directory.Exists(actualPath)) {
+            if (!Directory.Exists(actualPath))
+            {
                 appContext?.Logger?.LogWarning("Logical mount path '{LogicalPath}' does not exist.  Skipping.", actualPath);
                 continue;
             }
 
-            var mountRoot = BuildTreeNode(virtualMountPoint, actualPath, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots, mountsConfig.HideEmptyDirectories);
+            var mountRoot = BuildTreeNode(virtualMountPoint, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots, mountsConfig.HideEmptyDirectories);
             if (mountRoot != null)
                 logicalMounts.Add(actualPath, mountRoot);
         }
@@ -332,10 +333,9 @@ public class FserveApp : IServerApp
         return logicalMountRoot;
     }
 
-    private TreeNode? BuildTreeNode(
+    private static TreeNode? BuildTreeNode(
         string mountPoint,
         string realRoot,
-        string realParent,
         string realCurrent,
         int recursiveDepth,
         Dictionary<string, TreeNode> virtualRoot,
@@ -353,14 +353,25 @@ public class FserveApp : IServerApp
 
         var relativeDirName = Path.GetRelativePath(realRoot, realCurrent);
         var relativeMountPath = Path.Combine(mountPoint, relativeDirName);
+        DirectoryInfo diRealCurrent = new(realCurrent);
 
         try
         {
-
             // This . add if not root, or base name if root
             if (relativeDirName == ".")
             {
-                nodes.Add(realCurrent, new TreeNode { RelativeName = ".", RelativePath = relativeMountPath, AbsolutePath = realCurrent, Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
+                nodes.Add(realCurrent, new TreeNode
+                {
+                    RelativeName = ".",
+                    RelativePath = relativeMountPath,
+                    AbsolutePath = realCurrent,
+                    Children = null,
+                    Count = 0,
+                    DescendentCount = 0,
+                    Size = 0,
+                    DescendentSize = 0,
+                    LastModified = diRealCurrent.LastWriteTimeUtc
+                });
             }
 
             // Parent ..
@@ -375,13 +386,24 @@ public class FserveApp : IServerApp
                         ? mountPoint
                         : Path.Combine(mountPoint, relParentPath);
 
-                    nodes.Add(parent.FullName, new TreeNode { RelativeName = "..", RelativePath = relMountParentPath, AbsolutePath = parent.FullName, Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
+                    nodes.Add(parent.FullName, new TreeNode
+                    {
+                        RelativeName = "..",
+                        RelativePath = relMountParentPath,
+                        AbsolutePath = parent.FullName,
+                        Children = null,
+                        Count = 0,
+                        DescendentCount = 0,
+                        Size = uint.MaxValue,
+                        DescendentSize = 0,
+                        LastModified = parent.LastWriteTimeUtc
+                    });
                     vcount++;
                 }
             }
             else
             {
-                nodes.Add(ROOT, new TreeNode { RelativeName = "..", RelativePath = ROOT, AbsolutePath = realRoot, Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = null });
+                nodes.Add(ROOT, new TreeNode { RelativeName = "..", RelativePath = ROOT, AbsolutePath = realRoot, Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = DateTimeOffset.UtcNow });
                 vcount++;
             }
 
@@ -393,7 +415,7 @@ public class FserveApp : IServerApp
                 {
                     foreach (var subdir in Directory.GetDirectories(realCurrent))
                     {
-                        var subdirNode = BuildTreeNode(mountPoint, realRoot, relativeDirName, subdir, recursiveDepth - 1, virtualRoot, hideEmptyDirectories);
+                        var subdirNode = BuildTreeNode(mountPoint, realRoot, subdir, recursiveDepth - 1, virtualRoot, hideEmptyDirectories);
                         if (subdirNode != null)
                         {
                             subdirCount++;
@@ -463,9 +485,9 @@ public class FserveApp : IServerApp
             Children = nodes.ToImmutableDictionary(),
             Count = (uint)nodes.Count - vcount, // Don't count . and ..
             DescendentCount = 0, // Set following this statement
-            Size = uint.MaxValue, // Directories have no inherent size
+            Size = (uint)nodes.Count, // Directories have no inherent size
             DescendentSize = 0, // Set following this statement
-            LastModified = null,
+            LastModified = diRealCurrent.LastWriteTimeUtc,
         };
         virtualRoot.Add(relMountPath, ret);
 
@@ -723,6 +745,7 @@ public class FserveApp : IServerApp
         byte[] chunkBuffer = new byte[1024 * 1024];
 
         var localChunks = new List<(ChunkInfo chunkInfo, string chunkFileName)>();
+        var chunkCount = (uint)Math.Ceiling((decimal)fileTreeNode.Size / (1024 * 1024));
         var count = 0;
         do
         {
@@ -749,6 +772,7 @@ public class FserveApp : IServerApp
                     DownloadTicket = ticket,
                     FileSize = fileTreeNode.Size,
                     FileHash = [.. fileHash],
+                    ChunkCount = chunkCount,
                     ChunkSequence = (uint)count,
                     ChunkSize = (uint)chunkBytes,
                     ChunkHash = chunkHash
@@ -836,6 +860,7 @@ public class FserveApp : IServerApp
             {
                 DownloadTicket = cr.DownloadTicket,
                 ChunkSeq = chunkInfo.ChunkSequence,
+                ChunkSize = chunkInfo.ChunkSize,
                 Payload = ByteString.CopyFrom(payload),
             },
             cc.SessionSharedKey), cancellationToken);

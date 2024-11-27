@@ -75,16 +75,37 @@ internal class Program
         List<Node> nodes = [];
         foreach (var node in nodesConfig.Instances)
         {
+            if (!IPAddress.TryParse(node.Value.ListenAddress, out IPAddress? listenAddr))
+            {
+                logger.LogCritical("Unable to parse IP listener address from settings ({Address}). Exiting.", node.Value.ListenAddress);
+                Environment.Exit(-4);
+            }
+
+            List<IPEndPoint> phonebook = [];
+            if (node.Value.KnownPeers != null)
+            {
+                foreach (var kp in node.Value.KnownPeers)
+                {
+                    if (!IPEndPoint.TryParse(kp, out IPEndPoint? kpEndpoint))
+                    {
+                        logger.LogCritical("Unable to parse IP known peer address from settings ({Address}). Exiting.", kp);
+                        Environment.Exit(-5);
+                    }
+                    phonebook.Add(kpEndpoint);
+                }
+            }
+
             // Load key container
             if (node.Value.KeyContainer == null)
             {
                 logger.LogInformation("No KeyContainer profiled for node {NodeShortName}. Creating new cryptographic key material.", node.Key);
+
                 nodes.Add(new Node(host, node.Key)
                 {
-                    ListenAddress = IPAddress.Parse(node.Value.ListenAddress),
+                    ListenAddress = listenAddr,
                     PeerPort = node.Value.PeerPort,
                     UserPort = node.Value.UserPort,
-                    Phonebook = node.Value.KnownPeers == null ? [] : node.Value.KnownPeers.Select(k => IPEndPoint.Parse(k)).ToArray()
+                    Phonebook = [.. phonebook]
                 });
             }
             else
@@ -96,12 +117,13 @@ internal class Program
                     case 0:
                         {
                             logger.LogWarning("Missing key container file found for node '{NodeShortName}'. Creating anew.", node.Key);
+
                             var newNode = new Node(host, node.Key)
                             {
-                                ListenAddress = IPAddress.Parse(node.Value.ListenAddress),
+                                ListenAddress = listenAddr,
                                 PeerPort = node.Value.PeerPort,
                                 UserPort = node.Value.UserPort,
-                                Phonebook = node.Value.KnownPeers == null ? [] : node.Value.KnownPeers.Select(k => IPEndPoint.Parse(k)).ToArray(),
+                                Phonebook = [.. phonebook],
                             };
 
                             if (!noPassword) Console.WriteLine($"{Environment.NewLine}Enter a password to encrypt the key container for node '{node.Key}'.  You must enter this each time you start the app to run the node with the same ID.");
@@ -129,10 +151,10 @@ internal class Program
                                     enc,
                                     salt62,
                                     password,
-                                    IPAddress.Parse(node.Value.ListenAddress),
+                                    listenAddr,
                                     node.Value.PeerPort,
                                     node.Value.UserPort,
-                                    node.Value.KnownPeers == null ? [] : node.Value.KnownPeers.Select(k => IPEndPoint.Parse(k)).ToArray()
+                                    [.. phonebook]
                                );
                                 if (newNode == null)
                                     await Console.Error.WriteLineAsync($"Incorrect password or other error creating the new from the key store file {keyContainerFile}");

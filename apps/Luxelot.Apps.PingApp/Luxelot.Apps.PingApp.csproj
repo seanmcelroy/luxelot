@@ -5,13 +5,13 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <PropertyGroup>
-    <AssemblyVersion>1.1.*</AssemblyVersion>
+    <AssemblyVersion>1.2.*</AssemblyVersion>
     <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
     <Deterministic>false</Deterministic>
   </PropertyGroup>
@@ -21,7 +21,7 @@
 
     <Copy
       SourceFiles="$(TargetDir)$(ProjectName).dll;$(TargetDir)$(ProjectName).pdb"
-      DestinationFolder="../../core/bin/Debug/net8.0" />
+      DestinationFolder="../../core/bin/Debug/net9.0" />
 
     <Message Text="Copied PingApp build outputs" Importance="High" />
   </Target>

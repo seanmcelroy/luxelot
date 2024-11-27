@@ -4,8 +4,10 @@
 
 ### Changed
 
-- Improved error handling for cross-platform execution
+- Improved error handling for cross-platform execution and settings file parsing
 - Changed peer ports in default settings file to IANA unassigned range 9763-9799
+- Upgraded to .NET 9.0 SDK
+- Resolved buffer issues related to large message sizes
 
 ## 1.3 - 2024-11-25
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3 - 2024-11-26
+
+### Changed
+
+- Completed implementation of `fsdownload` command and multi-chunk file reassembly
+- Modified the output of `fslist` for readability, more similiar to *nix `ls`
+- Upgraded to .NET 9.0 SDK
+
+### Added
+
+- Command for `fslcd` to specify the download directory using a 'change local directory'/'lcd' paradigm
+
 ## 1.2 - 2024-11-25
 
 ### Changed

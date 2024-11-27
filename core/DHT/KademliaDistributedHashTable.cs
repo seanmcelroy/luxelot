@@ -11,7 +11,6 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
     // NOTE: https://kelseyc18.github.io/kademlia_vis/lookup/
     // NOTE: https://codethechange.stanford.edu/guides/guide_kademlia.html#key-computer-lookups
 
-
     private readonly ImmutableArray<byte> NodeIdentitykeyPublicThumbprint = nodeIdentitykeyPublicThumbprint;
 
     private readonly Bucket[] Buckets = new Bucket[Constants.TREE_HEIGHT];
@@ -71,9 +70,6 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
 
     public static byte[] GetDistanceMetric(ImmutableArray<byte> key1, ImmutableArray<byte> key2)
     {
-        ArgumentNullException.ThrowIfNull(key1);
-        ArgumentNullException.ThrowIfNull(key2);
-
         if (key1.IsDefault)
             throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(key1));
         if (key2.IsDefault)
@@ -90,8 +86,6 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
 
     public bool InsertBucketValue(ImmutableArray<byte> nodeKey, ImmutableArray<byte> key, IBucketEntryValue value, ILogger? logger)
     {
-        ArgumentNullException.ThrowIfNull(nodeKey);
-        ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(value);
 
         if (nodeKey.IsDefault)
@@ -124,9 +118,6 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
 
     public bool TryGetValue(ImmutableArray<byte> nodeKey, ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value)
     {
-        ArgumentNullException.ThrowIfNull(nodeKey);
-        ArgumentNullException.ThrowIfNull(key);
-
         if (nodeKey.IsDefault)
             throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(nodeKey));
         if (key.IsDefault)
@@ -140,7 +131,7 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
             return false;
         }
 
-        var be = Buckets[kbucket - 1].Entries.FirstOrDefault(e => Enumerable.SequenceEqual(e.Key, key));
+        var be = Buckets[kbucket - 1].Entries.FirstOrDefault(e => !e.Key.IsDefault && Enumerable.SequenceEqual(e.Key, key));
         if (be == default)
         {
             value = null;

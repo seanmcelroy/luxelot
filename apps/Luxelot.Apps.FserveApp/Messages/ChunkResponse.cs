@@ -24,14 +24,14 @@ namespace Luxelot.Apps.FserveApp.Messages {
     static ChunkResponseReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "ChRjaHVua19yZXNwb25zZS5wcm90byJMCg1DaHVua1Jlc3BvbnNlEhcKD2Rv",
-            "d25sb2FkX3RpY2tldBgBIAEoCRIRCgljaHVua19zZXEYAiABKA0SDwoHcGF5",
-            "bG9hZBgDIAEoDEIiqgIfTHV4ZWxvdC5BcHBzLkZzZXJ2ZUFwcC5NZXNzYWdl",
-            "c2IGcHJvdG8z"));
+            "ChRjaHVua19yZXNwb25zZS5wcm90byJgCg1DaHVua1Jlc3BvbnNlEhcKD2Rv",
+            "d25sb2FkX3RpY2tldBgBIAEoCRIRCgljaHVua19zZXEYAiABKA0SEgoKY2h1",
+            "bmtfc2l6ZRgDIAEoDRIPCgdwYXlsb2FkGAQgASgMQiKqAh9MdXhlbG90LkFw",
+            "cHMuRnNlcnZlQXBwLk1lc3NhZ2VzYgZwcm90bzM="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.ChunkResponse), global::Luxelot.Apps.FserveApp.Messages.ChunkResponse.Parser, new[]{ "DownloadTicket", "ChunkSeq", "Payload" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.ChunkResponse), global::Luxelot.Apps.FserveApp.Messages.ChunkResponse.Parser, new[]{ "DownloadTicket", "ChunkSeq", "ChunkSize", "Payload" }, null, null, null, null)
           }));
     }
     #endregion
@@ -74,6 +74,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     public ChunkResponse(ChunkResponse other) : this() {
       downloadTicket_ = other.downloadTicket_;
       chunkSeq_ = other.chunkSeq_;
+      chunkSize_ = other.chunkSize_;
       payload_ = other.payload_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
@@ -108,8 +109,20 @@ namespace Luxelot.Apps.FserveApp.Messages {
       }
     }
 
+    /// <summary>Field number for the "chunk_size" field.</summary>
+    public const int ChunkSizeFieldNumber = 3;
+    private uint chunkSize_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint ChunkSize {
+      get { return chunkSize_; }
+      set {
+        chunkSize_ = value;
+      }
+    }
+
     /// <summary>Field number for the "payload" field.</summary>
-    public const int PayloadFieldNumber = 3;
+    public const int PayloadFieldNumber = 4;
     private pb::ByteString payload_ = pb::ByteString.Empty;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -137,6 +150,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       }
       if (DownloadTicket != other.DownloadTicket) return false;
       if (ChunkSeq != other.ChunkSeq) return false;
+      if (ChunkSize != other.ChunkSize) return false;
       if (Payload != other.Payload) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
@@ -147,6 +161,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       int hash = 1;
       if (DownloadTicket.Length != 0) hash ^= DownloadTicket.GetHashCode();
       if (ChunkSeq != 0) hash ^= ChunkSeq.GetHashCode();
+      if (ChunkSize != 0) hash ^= ChunkSize.GetHashCode();
       if (Payload.Length != 0) hash ^= Payload.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
@@ -174,8 +189,12 @@ namespace Luxelot.Apps.FserveApp.Messages {
         output.WriteRawTag(16);
         output.WriteUInt32(ChunkSeq);
       }
+      if (ChunkSize != 0) {
+        output.WriteRawTag(24);
+        output.WriteUInt32(ChunkSize);
+      }
       if (Payload.Length != 0) {
-        output.WriteRawTag(26);
+        output.WriteRawTag(34);
         output.WriteBytes(Payload);
       }
       if (_unknownFields != null) {
@@ -196,8 +215,12 @@ namespace Luxelot.Apps.FserveApp.Messages {
         output.WriteRawTag(16);
         output.WriteUInt32(ChunkSeq);
       }
+      if (ChunkSize != 0) {
+        output.WriteRawTag(24);
+        output.WriteUInt32(ChunkSize);
+      }
       if (Payload.Length != 0) {
-        output.WriteRawTag(26);
+        output.WriteRawTag(34);
         output.WriteBytes(Payload);
       }
       if (_unknownFields != null) {
@@ -215,6 +238,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
       }
       if (ChunkSeq != 0) {
         size += 1 + pb::CodedOutputStream.ComputeUInt32Size(ChunkSeq);
+      }
+      if (ChunkSize != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt32Size(ChunkSize);
       }
       if (Payload.Length != 0) {
         size += 1 + pb::CodedOutputStream.ComputeBytesSize(Payload);
@@ -236,6 +262,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
       }
       if (other.ChunkSeq != 0) {
         ChunkSeq = other.ChunkSeq;
+      }
+      if (other.ChunkSize != 0) {
+        ChunkSize = other.ChunkSize;
       }
       if (other.Payload.Length != 0) {
         Payload = other.Payload;
@@ -263,7 +292,11 @@ namespace Luxelot.Apps.FserveApp.Messages {
             ChunkSeq = input.ReadUInt32();
             break;
           }
-          case 26: {
+          case 24: {
+            ChunkSize = input.ReadUInt32();
+            break;
+          }
+          case 34: {
             Payload = input.ReadBytes();
             break;
           }
@@ -290,7 +323,11 @@ namespace Luxelot.Apps.FserveApp.Messages {
             ChunkSeq = input.ReadUInt32();
             break;
           }
-          case 26: {
+          case 24: {
+            ChunkSize = input.ReadUInt32();
+            break;
+          }
+          case 34: {
             Payload = input.ReadBytes();
             break;
           }
