@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4 - 2024-11-27
+
+### Added
+
+- File permissions are now provided in `fslist` results
+- Umask configuration applied to display results
+
 ## 1.3 - 2024-11-26
 
 ### Changed

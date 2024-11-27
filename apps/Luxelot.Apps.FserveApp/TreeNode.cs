@@ -14,7 +14,8 @@ public class TreeNode
         Size = uint.MaxValue,
         DescendentSize = uint.MaxValue,
         Children = null,
-        LastModified = DateTimeOffset.UtcNow
+        LastModified = DateTimeOffset.UtcNow,
+        UnixFileMode = UnixFileMode.None,
     };
 
     public required string RelativeName { get; init; }
@@ -25,5 +26,6 @@ public class TreeNode
     public required uint DescendentSize { get; set; }
     public required uint Count { get; init; }
     public required uint DescendentCount { get; set; }
+    public required UnixFileMode UnixFileMode { get; init; }
     public required ImmutableDictionary<string, TreeNode>? Children { get; init; }
 }

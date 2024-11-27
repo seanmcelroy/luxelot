@@ -27,22 +27,23 @@ namespace Luxelot.Apps.FserveApp.Messages {
             "ChNsaXN0X3Jlc3BvbnNlLnByb3RvGh9nb29nbGUvcHJvdG9idWYvdGltZXN0",
             "YW1wLnByb3RvInkKDExpc3RSZXNwb25zZRITCgtzdGF0dXNfY29kZRgBIAEo",
             "BRIWCg5zdGF0dXNfbWVzc2FnZRgCIAEoCRIRCglkaXJlY3RvcnkYAyABKAkS",
-            "DwoHcGF0dGVybhgEIAEoCRIYCgdyZXN1bHRzGAUgAygLMgcuUmVzdWx0ImQK",
+            "DwoHcGF0dGVybhgEIAEoCRIYCgdyZXN1bHRzGAUgAygLMgcuUmVzdWx0InIK",
             "BlJlc3VsdBIMCgRuYW1lGAEgASgJEgwKBHNpemUYAiABKA0SMQoIbW9kaWZp",
-            "ZWQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQFCCwoJ",
-            "X21vZGlmaWVkQiKqAh9MdXhlbG90LkFwcHMuRnNlcnZlQXBwLk1lc3NhZ2Vz",
-            "YgZwcm90bzM="));
+            "ZWQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQESDAoE",
+            "bW9kZRgEIAEoDUILCglfbW9kaWZpZWRCIqoCH0x1eGVsb3QuQXBwcy5Gc2Vy",
+            "dmVBcHAuTWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { global::Google.Protobuf.WellKnownTypes.TimestampReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.ListResponse), global::Luxelot.Apps.FserveApp.Messages.ListResponse.Parser, new[]{ "StatusCode", "StatusMessage", "Directory", "Pattern", "Results" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.Result), global::Luxelot.Apps.FserveApp.Messages.Result.Parser, new[]{ "Name", "Size", "Modified" }, new[]{ "Modified" }, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.Result), global::Luxelot.Apps.FserveApp.Messages.Result.Parser, new[]{ "Name", "Size", "Modified", "Mode" }, new[]{ "Modified" }, null, null, null)
           }));
     }
     #endregion
 
   }
   #region Messages
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class ListResponse : pb::IMessage<ListResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -303,7 +304,11 @@ namespace Luxelot.Apps.FserveApp.Messages {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -338,7 +343,11 @@ namespace Luxelot.Apps.FserveApp.Messages {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -369,6 +378,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
 
   }
 
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class Result : pb::IMessage<Result>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -406,6 +416,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       name_ = other.name_;
       size_ = other.size_;
       modified_ = other.modified_ != null ? other.modified_.Clone() : null;
+      mode_ = other.mode_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -451,6 +462,18 @@ namespace Luxelot.Apps.FserveApp.Messages {
       }
     }
 
+    /// <summary>Field number for the "mode" field.</summary>
+    public const int ModeFieldNumber = 4;
+    private uint mode_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint Mode {
+      get { return mode_; }
+      set {
+        mode_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -469,6 +492,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       if (Name != other.Name) return false;
       if (Size != other.Size) return false;
       if (!object.Equals(Modified, other.Modified)) return false;
+      if (Mode != other.Mode) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -479,6 +503,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       if (Name.Length != 0) hash ^= Name.GetHashCode();
       if (Size != 0) hash ^= Size.GetHashCode();
       if (modified_ != null) hash ^= Modified.GetHashCode();
+      if (Mode != 0) hash ^= Mode.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -509,6 +534,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
         output.WriteRawTag(26);
         output.WriteMessage(Modified);
       }
+      if (Mode != 0) {
+        output.WriteRawTag(32);
+        output.WriteUInt32(Mode);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -531,6 +560,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
         output.WriteRawTag(26);
         output.WriteMessage(Modified);
       }
+      if (Mode != 0) {
+        output.WriteRawTag(32);
+        output.WriteUInt32(Mode);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -549,6 +582,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
       }
       if (modified_ != null) {
         size += 1 + pb::CodedOutputStream.ComputeMessageSize(Modified);
+      }
+      if (Mode != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt32Size(Mode);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -574,6 +610,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
         }
         Modified.MergeFrom(other.Modified);
       }
+      if (other.Mode != 0) {
+        Mode = other.Mode;
+      }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -585,7 +624,11 @@ namespace Luxelot.Apps.FserveApp.Messages {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -604,6 +647,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
             input.ReadMessage(Modified);
             break;
           }
+          case 32: {
+            Mode = input.ReadUInt32();
+            break;
+          }
         }
       }
     #endif
@@ -615,7 +662,11 @@ namespace Luxelot.Apps.FserveApp.Messages {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-        switch(tag) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -632,6 +683,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
               Modified = new global::Google.Protobuf.WellKnownTypes.Timestamp();
             }
             input.ReadMessage(Modified);
+            break;
+          }
+          case 32: {
+            Mode = input.ReadUInt32();
             break;
           }
         }

@@ -308,7 +308,9 @@ public class FserveApp : IServerApp
                 continue;
             }
 
-            var mountRoot = BuildTreeNode(virtualMountPoint, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots, mountsConfig.HideEmptyDirectories);
+
+
+            var mountRoot = BuildTreeNode(virtualMountPoint, actualPath, actualPath, mount.Value.RecursiveDepth, virtualRoots, mountsConfig.HideEmptyDirectories, mount.Value.Umask);
             if (mountRoot != null)
                 logicalMounts.Add(actualPath, mountRoot);
         }
@@ -324,6 +326,7 @@ public class FserveApp : IServerApp
             Size = uint.MaxValue,
             DescendentSize = 0, // Set following this statement
             LastModified = null,
+            UnixFileMode = UnixFileMode.UserRead & UnixFileMode.GroupRead & UnixFileMode.OtherRead
         };
         logicalMountRoot.DescendentCount = RecursiveCount(logicalMountRoot);
         logicalMountRoot.DescendentSize = RecursiveSize(logicalMountRoot);
@@ -339,10 +342,13 @@ public class FserveApp : IServerApp
         string realCurrent,
         int recursiveDepth,
         Dictionary<string, TreeNode> virtualRoot,
-        bool hideEmptyDirectories)
+        bool hideEmptyDirectories,
+        uint umask)
     {
+        ArgumentNullException.ThrowIfNull(mountPoint);
         ArgumentNullException.ThrowIfNull(realRoot);
         ArgumentNullException.ThrowIfNull(realCurrent);
+
         if (!Directory.Exists(realRoot))
             throw new DirectoryNotFoundException(realRoot);
         if (!Directory.Exists(realCurrent))
@@ -370,7 +376,8 @@ public class FserveApp : IServerApp
                     DescendentCount = 0,
                     Size = 0,
                     DescendentSize = 0,
-                    LastModified = diRealCurrent.LastWriteTimeUtc
+                    LastModified = diRealCurrent.LastWriteTimeUtc,
+                    UnixFileMode = diRealCurrent.UnixFileMode.ApplyUmask(umask),
                 });
             }
 
@@ -396,14 +403,27 @@ public class FserveApp : IServerApp
                         DescendentCount = 0,
                         Size = uint.MaxValue,
                         DescendentSize = 0,
-                        LastModified = parent.LastWriteTimeUtc
+                        LastModified = parent.LastWriteTimeUtc,
+                        UnixFileMode = parent.UnixFileMode.ApplyUmask(umask),
                     });
                     vcount++;
                 }
             }
             else
             {
-                nodes.Add(ROOT, new TreeNode { RelativeName = "..", RelativePath = ROOT, AbsolutePath = realRoot, Children = null, Count = 0, DescendentCount = 0, Size = uint.MaxValue, DescendentSize = 0, LastModified = DateTimeOffset.UtcNow });
+                nodes.Add(ROOT, new TreeNode
+                {
+                    RelativeName = "..",
+                    RelativePath = ROOT,
+                    AbsolutePath = realRoot,
+                    Children = null,
+                    Count = 0,
+                    DescendentCount = 0,
+                    Size = uint.MaxValue,
+                    DescendentSize = 0,
+                    LastModified = DateTimeOffset.UtcNow,
+                    UnixFileMode = UnixFileMode.UserRead & UnixFileMode.GroupRead & UnixFileMode.OtherRead,
+                });
                 vcount++;
             }
 
@@ -415,7 +435,7 @@ public class FserveApp : IServerApp
                 {
                     foreach (var subdir in Directory.GetDirectories(realCurrent))
                     {
-                        var subdirNode = BuildTreeNode(mountPoint, realRoot, subdir, recursiveDepth - 1, virtualRoot, hideEmptyDirectories);
+                        var subdirNode = BuildTreeNode(mountPoint, realRoot, subdir, recursiveDepth - 1, virtualRoot, hideEmptyDirectories, umask);
                         if (subdirNode != null)
                         {
                             subdirCount++;
@@ -452,12 +472,16 @@ public class FserveApp : IServerApp
                             Size = size,
                             DescendentSize = size,
                             LastModified = fi.LastWriteTimeUtc,
+                            UnixFileMode = fi.UnixFileMode.ApplyUmask(umask),
                         });
                     }
                 }
                 catch (DirectoryNotFoundException)
                 {
                     // Swallow.  Some types of *nix files behave this way.
+                }
+                catch (UnauthorizedAccessException)
+                {
                 }
             }
 
@@ -488,6 +512,7 @@ public class FserveApp : IServerApp
             Size = (uint)nodes.Count, // Directories have no inherent size
             DescendentSize = 0, // Set following this statement
             LastModified = diRealCurrent.LastWriteTimeUtc,
+            UnixFileMode = diRealCurrent.UnixFileMode.ApplyUmask(umask),
         };
         virtualRoot.Add(relMountPath, ret);
 
@@ -548,7 +573,8 @@ public class FserveApp : IServerApp
             {
                 Name = c.Value.RelativeName,
                 Size = c.Value.Size,
-                Modified = c.Value.LastModified == null ? null : Timestamp.FromDateTimeOffset(c.Value.LastModified.Value)
+                Modified = c.Value.LastModified == null ? null : Timestamp.FromDateTimeOffset(c.Value.LastModified.Value),
+                Mode = (uint)c.Value.UnixFileMode
             }));
         }
 

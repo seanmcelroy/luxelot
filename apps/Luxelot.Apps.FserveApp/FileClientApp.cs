@@ -371,7 +371,7 @@ public class FileClientApp : IClientApp
             var size_len = listResponse.Results.Max(r => r.Size.ToString().Length);
             foreach (var result in listResponse.Results)
             {
-                sb.AppendFormat("{0:MMM dd HH:mm} {1} {2}\r\n", result.Modified.ToDateTimeOffset(), result.Size.ToString().PadLeft(size_len), result.Name);
+                sb.AppendFormat("{0} {1:MMM dd HH:mm} {2} {3}\r\n", DisplayUtils.UnixFileModeToString(result.Mode, false), result.Modified.ToDateTimeOffset(), result.Size.ToString().PadLeft(size_len), result.Name);
             }
         }
         sb.AppendLine("End of List");

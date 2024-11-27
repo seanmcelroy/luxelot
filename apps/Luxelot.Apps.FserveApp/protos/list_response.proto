@@ -17,4 +17,5 @@ message Result {
     string name = 1;
     uint32 size = 2;
     optional google.protobuf.Timestamp modified = 3;
+    uint32 mode = 4;
 }
