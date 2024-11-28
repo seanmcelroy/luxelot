@@ -4,7 +4,6 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
-using Luxelot.Apps.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
@@ -139,10 +138,10 @@ internal class Peer : IDisposable
             return false;
         }
 
-        Envelope envelope;
+        Messages.Envelope envelope;
         try
         {
-            envelope = Envelope.Parser.ParseFrom(buffer, 0, size);
+            envelope = Messages.Envelope.Parser.ParseFrom(buffer, 0, size);
         }
         catch (InvalidProtocolBufferException ex)
         {
@@ -451,7 +450,6 @@ internal class Peer : IDisposable
         ShortName = $"{Name[..8]}";
 
         nodeContext.Logger?.LogDebug("ID Key for {PeerShortName} ({RemoteEndPoint}) is thumbprint {Thumbprint}", ShortName, RemoteEndPoint, DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint));
-        //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, DisplayUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
         nodeContext.Logger?.LogDebug("Sending Ack to peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
 
         byte[] addrBytes = new byte[16];
@@ -555,7 +553,6 @@ internal class Peer : IDisposable
         // Remember what this peer perceives my IP address as
         ClientPerceivedLocalAddress = NetUtils.ConvertMessageIntegersToIPAddress(ack.Addr1, ack.Addr2, ack.Addr3, ack.Addr4);
 
-        //nodeContext.Logger?.LogCritical("SESSION KEY HASH {PeerShortName} ({peer.RemoteEndPoint})={SessionKeyHash}", PeerShortName, RemoteEndPoint, CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey!)));
         nodeContext.Logger?.LogDebug("Recieved Ack from peer {PeerShortName} ({RemoteEndPoint}).  Peer perceives this node at {LocalAddress}", ShortName, RemoteEndPoint, ClientPerceivedLocalAddress);
         return true;
     }
@@ -636,7 +633,7 @@ internal class Peer : IDisposable
         disposed = true;
     }
 
-    public Envelope PrepareEnvelope(IMessage message, ILogger? logger)
+    public Messages.Envelope PrepareEnvelope(IMessage message, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(message);
         if (message is ErrorMessage em)
@@ -650,25 +647,25 @@ internal class Peer : IDisposable
         throw new ArgumentException($"Unsupported envelope payload type {message.GetType().FullName}");
     }
 
-    public Envelope PrepareEnvelope(ErrorMessage message, ILogger? logger)
+    internal Messages.Envelope PrepareEnvelope(ErrorMessage message, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(message);
         return PrepareEnvelopeInternal(em: message, logger: logger);
     }
 
-    public Envelope PrepareEnvelope(ForwardedMessage message, ILogger? logger)
+    internal Messages.Envelope PrepareEnvelope(ForwardedMessage message, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(message);
         return PrepareEnvelopeInternal(fm: message, logger: logger);
     }
 
-    public Envelope PrepareEnvelope(DirectedMessage message, ILogger? logger)
+    internal Messages.Envelope PrepareEnvelope(DirectedMessage message, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(message);
         return PrepareEnvelopeInternal(dm: message, logger: logger);
     }
 
-    private Envelope PrepareEnvelopeInternal(ErrorMessage? em = null, ForwardedMessage? fm = null, DirectedMessage? dm = null, ILogger? logger = null)
+    private Messages.Envelope PrepareEnvelopeInternal(ErrorMessage? em = null, ForwardedMessage? fm = null, DirectedMessage? dm = null, ILogger? logger = null)
     {
         var envelope_payload = new EnvelopePayload();
         if (em != null)
@@ -693,7 +690,7 @@ internal class Peer : IDisposable
         return CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, SessionSharedKey, logger);
     }
 
-    public async Task SendSyn(NodeContext nodeContext, CancellationToken cancellationToken)
+    internal async Task SendSyn(NodeContext nodeContext, CancellationToken cancellationToken)
     {
         if (SessionPublicKey == null)
         {
@@ -715,7 +712,7 @@ internal class Peer : IDisposable
         State = PeerState.SYN_SENT;
     }
 
-    public async Task<bool> SendEnvelope(Envelope envelope, ILogger? logger, CancellationToken cancellationToken)
+    internal async Task<bool> SendEnvelope(Messages.Envelope envelope, ILogger? logger, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 

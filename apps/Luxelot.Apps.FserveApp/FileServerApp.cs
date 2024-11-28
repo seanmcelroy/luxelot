@@ -786,7 +786,7 @@ public class FserveApp : IServerApp
                         },
                 cc.SessionSharedKey), cancellationToken);
 
-        
+
 
         var fi = new FileInfo(fileTreeNode.AbsolutePath);
         var ticket = $"luxelot-fs-{requestContext.PeerShortName}-{Guid.NewGuid()}";
@@ -811,7 +811,22 @@ public class FserveApp : IServerApp
             var chunkBytes = brFile.Read(chunkBuffer, 0, chunkBuffer.Length);
             if (chunkBytes == 0)
                 break;
-            var chunkHash = SHA256.HashData(chunkBuffer.AsSpan(0, chunkBytes)).ToImmutableArray();
+
+            byte[] chunkHash = new byte[32];
+            if (!SHA256.TryHashData(chunkBuffer.AsSpan(0, chunkBytes), chunkHash, out _))
+            {
+                appContext.Logger?.LogError("Unable to hash chunk for ticket {Ticket} seq {ChunkSequence} for `{File}`. Aborting.", ticket, count, fi.FullName);
+                return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                    appContext,
+                            new Status
+                            {
+                                Operation = Operation.GetChunk,
+                                StatusCode = 500,
+                                StatusMessage = $"{fileTreeNode.RelativePath} Error generating chunk hash",
+                                ResultPayload = ByteString.Empty
+                            },
+                    cc.SessionSharedKey), cancellationToken);
+            }
 
             var chunkFilename = Path.GetTempFileName();
             var relocatedChunkFilename = Path.Combine(ticketDir, Path.GetFileName(chunkFilename));
@@ -833,7 +848,7 @@ public class FserveApp : IServerApp
                     ChunkCount = chunkCount,
                     ChunkSequence = (uint)count,
                     ChunkSize = (uint)chunkBytes,
-                    ChunkHash = chunkHash
+                    ChunkHash = [.. chunkHash]
                 },
                 chunkFilename));
         } while (!cancellationToken.IsCancellationRequested);

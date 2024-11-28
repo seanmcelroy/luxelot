@@ -21,7 +21,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Generators;
-using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 using static Luxelot.Apps.Common.RegexUtils;
 

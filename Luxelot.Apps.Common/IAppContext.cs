@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Google.Protobuf;
 using Luxelot.Apps.Common.DHT;
-using Luxelot.Apps.Common.Messages;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.Common;

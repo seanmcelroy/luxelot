@@ -1,4 +1,4 @@
-# fserve
+# Fserve (file server)
 
 This app provides an FTP-like service over Luxelot.  The purpose of this app is to provide a way to offer and access node-based storage.  This is in contrast to "network-based" storage, which would use more traditional distributed hash table principles.
 

@@ -73,8 +73,8 @@ public class PingServer : IServerApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        appContext.Logger?.LogInformation("PONG from {PeerShortName} ({RemoteEndPoint}): {Contents}", requestContext.PeerShortName, requestContext.RemoteEndPoint, $"id={pong.Identifier} seq={pong.Sequence}");
-        await appContext.SendConsoleMessage($"{pong.CalculateSize()} bytes from {requestContext.RemoteEndPoint}: seq={pong.Sequence}", cancellationToken);
+        appContext.Logger?.LogInformation("PONG from {Source} via {PeerShortName} ({RemoteEndPoint}): {Contents}", requestContext.RequestSourceThumbprintHex, requestContext.PeerShortName, requestContext.RemoteEndPoint, $"id={pong.Identifier} seq={pong.Sequence}");
+        await appContext.SendConsoleMessage($"{pong.CalculateSize()} bytes from {requestContext.RequestSourceThumbprintHex[..8]}... via {requestContext.PeerShortName} ({requestContext.RemoteEndPoint}): seq={pong.Sequence}", cancellationToken);
         return true;
     }
 }

@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Google.Protobuf;
-using Luxelot.Apps.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
@@ -143,19 +142,22 @@ public class AppContext : IAppContext
         return success;
     }
 
-    public Envelope EncryptEnvelope(byte[] envelope_payload_bytes, ImmutableArray<byte> sessionSharedKey, ILogger? logger)
+    public Apps.Common.Envelope EncryptEnvelope(byte[] envelope_payload_bytes, ImmutableArray<byte> sessionSharedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(envelope_payload_bytes);
 
-        return CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, sessionSharedKey, logger);
+        var envelope = CryptoUtils.EncryptEnvelopeInternal(envelope_payload_bytes, sessionSharedKey, logger);
+
+        return new Apps.Common.Envelope
+        {
+            Nonce = envelope.Nonce.Span,
+            Ciphertext = envelope.Ciphertext.Span,
+            Tag = envelope.Tag.Span,
+            AssociatedData = envelope.AssociatedData.Span,
+        };
     }
 
-    public byte[]? DecryptEnvelope(Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger)
-    {
-        ArgumentNullException.ThrowIfNull(envelope);
-
-        return CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
-    }
+    public byte[]? DecryptEnvelope(Apps.Common.Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger) => CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
 
     public async Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken) => await Node.EnterAppInteractiveMode(clientAppName, cancellationToken);
 

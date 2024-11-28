@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6 - 2024-11-28
+
+### Changed
+
+- Moved Envelope proto message into internal implementation, only exposing a ref struct to loadable apps
+
 ## 1.5 - 2024-11-27
 
 ### Changed

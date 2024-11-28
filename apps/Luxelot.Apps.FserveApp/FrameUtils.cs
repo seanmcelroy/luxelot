@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using Google.Protobuf;
-using Luxelot.Apps.Common.Messages;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.FserveApp.Messages;
 using Microsoft.Extensions.Logging;
@@ -33,10 +32,10 @@ public static class FrameUtils
 
         return new ServerFrame
         {
-            Nonce = envelope.Nonce,
-            Ciphertext = envelope.Ciphertext,
-            Tag = envelope.Tag,
-            AssociatedData = envelope.AssociatedData,
+            Nonce = ByteString.CopyFrom(envelope.Nonce),
+            Ciphertext = ByteString.CopyFrom(envelope.Ciphertext),
+            Tag = ByteString.CopyFrom(envelope.Tag),
+            AssociatedData = ByteString.CopyFrom(envelope.AssociatedData),
             FrameType = frameType
         };
     }
@@ -64,10 +63,10 @@ public static class FrameUtils
 
         return new ClientFrame
         {
-            Nonce = envelope.Nonce,
-            Ciphertext = envelope.Ciphertext,
-            Tag = envelope.Tag,
-            AssociatedData = envelope.AssociatedData,
+            Nonce = ByteString.CopyFrom(envelope.Nonce),
+            Ciphertext = ByteString.CopyFrom(envelope.Ciphertext),
+            Tag = ByteString.CopyFrom(envelope.Tag),
+            AssociatedData = ByteString.CopyFrom(envelope.AssociatedData),
             FrameType = frameType
         };
     }
@@ -77,10 +76,10 @@ public static class FrameUtils
         // Marshal into an envelope to use shared method in IAppContext
         var envelope = new Envelope
         {
-            Nonce = frame.Nonce,
-            Ciphertext = frame.Ciphertext,
-            Tag = frame.Tag,
-            AssociatedData = frame.AssociatedData
+            Nonce = frame.Nonce.Span,
+            Ciphertext = frame.Ciphertext.Span,
+            Tag = frame.Tag.Span,
+            AssociatedData = frame.AssociatedData.Span
         };
 
         var decrypted = appContext.DecryptEnvelope(envelope, sessionKey, appContext.Logger);
@@ -102,10 +101,10 @@ public static class FrameUtils
         // Marshal into an envelope to use shared method in IAppContext
         var envelope = new Envelope
         {
-            Nonce = frame.Nonce,
-            Ciphertext = frame.Ciphertext,
-            Tag = frame.Tag,
-            AssociatedData = frame.AssociatedData
+            Nonce = frame.Nonce.Span,
+            Ciphertext = frame.Ciphertext.Span,
+            Tag = frame.Tag.Span,
+            AssociatedData = frame.AssociatedData.Span
         };
 
         var decrypted = appContext.DecryptEnvelope(envelope, sessionKey, appContext.Logger);

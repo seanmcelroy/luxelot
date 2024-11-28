@@ -1,14 +1,13 @@
 using System.Security.Cryptography;
-using Luxelot.Apps.Common.Messages;
-using Luxelot.Apps.Common;
 using Luxelot.Messages;
+using Luxelot.Apps.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot;
 
 public static class MessageUtils
 {
-    public static void Dump(this Envelope envelope, ILogger? logger = null)
+    public static void Dump(this Messages.Envelope envelope, ILogger? logger = null)
     {
         logger?.LogTrace(
          "\r\nNonce={Nonce}" +

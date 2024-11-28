@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
-using Luxelot.Apps.Common.Messages;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
@@ -11,7 +10,7 @@ using Org.BouncyCastle.Security;
 
 namespace Luxelot;
 
-public static class CryptoUtils
+internal static class CryptoUtils
 {
     private static readonly Mutex mutex = new();
     private static readonly SecureRandom SecureRandom = new();
@@ -19,7 +18,7 @@ public static class CryptoUtils
     // Kyber - Super helpful: https://stackoverflow.com/questions/75240825/implementing-crystals-kyber-using-bouncycastle-java
     // Dilithium - Super helpful: https://asecuritysite.com/bouncy/bc_dil
 
-    public static AsymmetricCipherKeyPair GenerateDilithiumKeyPair()
+    internal static AsymmetricCipherKeyPair GenerateDilithiumKeyPair()
     {
         // These keys are used for NODE IDENTITY.  The node can sign envelopes forwarded
         // by other nodes around the network.
@@ -115,7 +114,7 @@ public static class CryptoUtils
         return key_pair;
     }
 
-    public static byte[] GetChrystalsKyberPublicKeyFromEncoded(AsymmetricCipherKeyPair keyPair)
+    internal static byte[] GetChrystalsKyberPublicKeyFromEncoded(AsymmetricCipherKeyPair keyPair)
     {
         ArgumentNullException.ThrowIfNull(keyPair);
 
@@ -124,7 +123,7 @@ public static class CryptoUtils
         return publicKeyBytes;
     }
 
-    public static byte[] GetChrystalsKyberPrivateKeyFromEncoded(AsymmetricCipherKeyPair keyPair)
+    internal static byte[] GetChrystalsKyberPrivateKeyFromEncoded(AsymmetricCipherKeyPair keyPair)
     {
         ArgumentNullException.ThrowIfNull(keyPair);
 
@@ -133,7 +132,7 @@ public static class CryptoUtils
         return privateKeyBytes;
     }
 
-    public static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey, ILogger? logger)
+    internal static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey, ILogger? logger)
     {
         var secretKeyWithEncapsulationSender = GenerateChrystalsKyberEncryptionKey(publicKey, logger);
 
@@ -180,13 +179,13 @@ public static class CryptoUtils
         return secret_with_encapsulation;
     }
 
-    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
+    internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
     {
         var privateKey = new KyberPrivateKeyParameters(KyberParameters.kyber1024, [.. privateKeyBytes]);
         return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey, logger);
     }
 
-    public static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
+    internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(privateKey);
 
@@ -221,11 +220,11 @@ public static class CryptoUtils
         return [.. key_bytes];
     }
 
-    public static Envelope EncryptEnvelopeInternal(byte[] envelopePayload, ImmutableArray<byte>? sharedKey, ILogger? logger)
+    internal static Messages.Envelope EncryptEnvelopeInternal(byte[] envelopePayload, ImmutableArray<byte>? sharedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(envelopePayload);
 
-        Envelope envelope;
+        Messages.Envelope envelope;
         byte[] nonce = new byte[12];
         byte[] plain_text = envelopePayload;
         byte[] cipher_text = new byte[plain_text.Length];
@@ -235,7 +234,7 @@ public static class CryptoUtils
         if (sharedKey == null)
         {
             // Loopback
-            envelope = new Envelope
+            envelope = new Messages.Envelope
             {
                 Nonce = ByteString.CopyFrom(nonce),
                 Ciphertext = ByteString.CopyFrom(plain_text), // No encryption for loopback
@@ -258,7 +257,7 @@ public static class CryptoUtils
                 throw;
             }
 
-            envelope = new Envelope
+            envelope = new Messages.Envelope
             {
                 Nonce = ByteString.CopyFrom(nonce),
                 Ciphertext = ByteString.CopyFrom(cipher_text),
@@ -272,29 +271,34 @@ public static class CryptoUtils
         return envelope;
     }
 
-    public static byte[] DecryptEnvelopeInternal(Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger)
+    internal static byte[] DecryptEnvelopeInternal(Messages.Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger) => DecryptEnvelopeInternal(new Apps.Common.Envelope
     {
-        ArgumentNullException.ThrowIfNull(envelope);
+        Nonce = envelope.Nonce.Span,
+        Ciphertext = envelope.Ciphertext.Span,
+        Tag = envelope.Tag.Span,
+        AssociatedData = envelope.AssociatedData.Span,
+    }, sharedKey, logger);
 
+    internal static byte[] DecryptEnvelopeInternal(Apps.Common.Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger)
+    {
         if (sharedKey == null)
         {
             // Loopback
-            return envelope.Ciphertext.ToByteArray();
+            return envelope.Ciphertext.ToArray();
         }
 
         //MessageUtils.Dump(envelope, logger);
-
-        byte[] nonce = envelope.Nonce.ToByteArray();
-        byte[] cipher_text = envelope.Ciphertext.ToByteArray();
-        byte[] tag = envelope.Tag.ToByteArray();
-        byte[] associated_data = envelope.AssociatedData.ToByteArray();
-
-        byte[] envelope_plain_text = new byte[cipher_text.Length];
+        byte[] envelope_plain_text = new byte[envelope.Ciphertext.Length];
 
         try
         {
             using ChaCha20Poly1305 cha = new([.. sharedKey]);
-            cha.Decrypt(nonce, cipher_text, tag, envelope_plain_text, associated_data);
+            cha.Decrypt(
+                envelope.Nonce.ToArray()
+                , envelope.Ciphertext.ToArray()
+                , envelope.Tag.ToArray()
+                , envelope_plain_text
+                , envelope.AssociatedData.ToArray());
         }
         catch (AuthenticationTagMismatchException atme)
         {
@@ -310,7 +314,7 @@ public static class CryptoUtils
         return envelope_plain_text;
     }
 
-    public static bool ValidateDilithiumSignature(ImmutableArray<byte> publicKey, byte[] message, byte[] signature)
+    internal static bool ValidateDilithiumSignature(ImmutableArray<byte> publicKey, byte[] message, byte[] signature)
     {
         var sourceVerify = new DilithiumSigner();
         DilithiumPublicKeyParameters parms = new(DilithiumParameters.Dilithium5, [.. publicKey]);
@@ -320,7 +324,7 @@ public static class CryptoUtils
 
 
     private const string DEFAULT_CHARACTER_SET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    public static string ConvertToBase62(this byte[] arr)
+    internal static string ConvertToBase62(this byte[] arr)
     {
         var converted = BaseConvert(arr, 256, 62);
         var builder = new StringBuilder();
@@ -331,7 +335,7 @@ public static class CryptoUtils
         return builder.ToString();
     }
 
-    public static byte[] ConvertFromBase62(this string base62)
+    internal static byte[] ConvertFromBase62(this string base62)
     {
         var arr = new byte[base62.Length];
         for (var i = 0; i < arr.Length; i++)
