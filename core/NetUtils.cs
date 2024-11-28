@@ -4,7 +4,7 @@ namespace Luxelot;
 
 internal static class NetUtils
 {
-    public static uint[]? ConvertIPAddressToMessageIntegers(IPAddress address)
+    internal static uint[]? ConvertIPAddressToMessageIntegers(IPAddress address)
     {
         ArgumentNullException.ThrowIfNull(address);
 
@@ -22,7 +22,7 @@ internal static class NetUtils
         return [addr1, addr2, addr3, addr4];
     }
 
-    public static IPAddress ConvertMessageIntegersToIPAddress(uint addr1, uint addr2, uint addr3, uint addr4)
+    internal static IPAddress ConvertMessageIntegersToIPAddress(uint addr1, uint addr2, uint addr3, uint addr4)
     {
         var decodedIpBytes = new byte[16];
         Array.Copy(BitConverter.GetBytes(addr1), 0, decodedIpBytes, 0, 4);

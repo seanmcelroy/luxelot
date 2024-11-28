@@ -4,7 +4,7 @@ namespace Luxelot.Apps.FserveApp;
 
 public class TreeNode
 {
-    public static readonly TreeNode EmptyRoot = new()
+    internal static readonly TreeNode EmptyRoot = new()
     {
         RelativeName = "/",
         RelativePath = "/",

@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Luxelot;
 
-public static class MessageUtils
+internal static class MessageUtils
 {
-    public static void Dump(this Messages.Envelope envelope, ILogger? logger = null)
+    internal static void Dump(this Messages.Envelope envelope, ILogger? logger = null)
     {
         logger?.LogTrace(
          "\r\nNonce={Nonce}" +
@@ -26,7 +26,7 @@ public static class MessageUtils
             $"\r\nTag={DisplayUtils.BytesToHex(envelope.Tag.ToByteArray())}");
     }
 
-    public static void Dump(this DirectedMessage dm, ILogger? logger = null)
+    internal static void Dump(this DirectedMessage dm, ILogger? logger = null)
     {
         logger?.LogTrace(
          "\r\nsrc={SrcIdentityPublicKeyThumbprint}" +
@@ -42,7 +42,7 @@ public static class MessageUtils
             $"\r\nsigSHA256={DisplayUtils.BytesToHex(SHA256.HashData(dm.Signature.ToByteArray()))}");
     }
 
-    public static bool IsValid(this ForwardedMessage fwd, ILogger? logger = null)
+    internal static bool IsValid(this ForwardedMessage fwd, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(fwd);
 

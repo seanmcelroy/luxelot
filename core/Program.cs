@@ -192,7 +192,7 @@ internal class Program
     /// </summary>
     /// <param name="mask">a <c>char</c> representing your choice of console mask</param>
     /// <returns>the string the user typed in </returns>
-    public static string ReadPassword(char mask)
+    internal static string ReadPassword(char mask)
     {
         const int ENTER = 13, BACKSP = 8, CTRLBACKSP = 127;
         int[] FILTERED = [0, 27, 9, 10];
@@ -234,8 +234,5 @@ internal class Program
     /// Like System.Console.ReadLine(), only with a mask.
     /// </summary>
     /// <returns>the string the user typed in </returns>
-    public static string ReadPassword()
-    {
-        return ReadPassword('*');
-    }
+    internal static string ReadPassword() => ReadPassword('*');
 }

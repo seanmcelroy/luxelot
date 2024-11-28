@@ -6,9 +6,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.FserveApp;
 
-public static class FrameUtils
+internal static class FrameUtils
 {
-    public static ServerFrame WrapServerFrame(IAppContext appContext, IMessage message, ImmutableArray<byte> sessionKey)
+    internal static ServerFrame WrapServerFrame(IAppContext appContext, IMessage message, ImmutableArray<byte> sessionKey)
     {
         var message_bytes = message.ToByteArray();
         var envelope = appContext.EncryptEnvelope(message_bytes, sessionKey, appContext.Logger);
@@ -40,7 +40,7 @@ public static class FrameUtils
         };
     }
 
-    public static ClientFrame WrapClientFrame(IAppContext appContext, IMessage message, ImmutableArray<byte> sessionKey)
+    internal static ClientFrame WrapClientFrame(IAppContext appContext, IMessage message, ImmutableArray<byte> sessionKey)
     {
         var message_bytes = message.ToByteArray();
         var envelope = appContext.EncryptEnvelope(message_bytes, sessionKey, appContext.Logger);
@@ -71,7 +71,7 @@ public static class FrameUtils
         };
     }
 
-    public static IMessage UnwrapFrame(IAppContext appContext, ClientFrame frame, ImmutableArray<byte> sessionKey)
+    internal static IMessage UnwrapFrame(IAppContext appContext, ClientFrame frame, ImmutableArray<byte> sessionKey)
     {
         // Marshal into an envelope to use shared method in IAppContext
         var envelope = new Envelope
@@ -96,7 +96,7 @@ public static class FrameUtils
         };
     }
 
-    public static IMessage UnwrapFrame(IAppContext appContext, ServerFrame frame, ImmutableArray<byte> sessionKey)
+    internal static IMessage UnwrapFrame(IAppContext appContext, ServerFrame frame, ImmutableArray<byte> sessionKey)
     {
         // Marshal into an envelope to use shared method in IAppContext
         var envelope = new Envelope
