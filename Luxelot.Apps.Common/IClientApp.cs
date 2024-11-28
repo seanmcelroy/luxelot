@@ -1,4 +1,6 @@
-﻿namespace Luxelot.Apps.Common;
+﻿using System.Windows.Input;
+
+namespace Luxelot.Apps.Common;
 
 public interface IClientApp
 {
@@ -13,5 +15,5 @@ public interface IClientApp
     public Task OnActivate(CancellationToken cancellationToken);
     public Task OnDeactivate(CancellationToken cancellationToken);
 
-    public Task<bool> HandleUserInput(string input, CancellationToken cancellationToken);
+    public Task<HandleUserInputResult> HandleUserInput(string input, CancellationToken cancellationToken);
 }

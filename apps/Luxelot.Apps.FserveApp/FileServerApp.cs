@@ -29,9 +29,9 @@ public class FserveApp : IServerApp
     private readonly ConcurrentDictionary<string, ClientConnection> ClientConnections = [];
 
     /// <summary>
-    /// Chunks waiting to be downloaded, keyed by the download 'ticket' and the chunks as the key.
+    /// Chunks waiting to be downloaded, keyed by the (requestor thumbprint HEX, download 'ticket') and the chunks as the key.
     /// </summary>
-    private readonly ConcurrentDictionary<string, (ChunkInfo chunkInfo, string chunkFileName)[]> ServerChunks = [];
+    private readonly ConcurrentDictionary<(string, string), (ChunkInfo chunkInfo, string chunkFileName)[]> ServerChunks = [];
 
     private static uint RecursiveCount(TreeNode t) => t.Children == null ? 0 : (t.Count + (uint)t.Children.Sum(t2 => RecursiveCount(t2.Value)));
     private static uint RecursiveSize(TreeNode t) => t.Children == null ? 0 : (t.Size + (uint)t.Children.Sum(t2 => RecursiveSize(t2.Value)));
@@ -69,10 +69,10 @@ public class FserveApp : IServerApp
             case Any any when any.Is(ClientFrame.Descriptor):
                 {
                     // From a client
-                    var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+                    var cacheKey = requestContext.RequestSourceThumbprintHex;
                     if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
                     {
-                        appContext.Logger?.LogDebug("AuthUserBegin received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+                        appContext.Logger?.LogDebug("AuthUserBegin received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", requestContext.RequestSourceThumbprintHex);
                         return true;
                     }
 
@@ -174,7 +174,7 @@ public class FserveApp : IServerApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        var cacheKey = requestContext.RequestSourceThumbprintHex;
         appContext.Logger?.LogDebug("AuthChannelBegin from {SourceThumbprint} via {PeerShortName}", cacheKey, requestContext.PeerShortName);
 
         if (ClientConnections.ContainsKey(cacheKey))
@@ -225,14 +225,14 @@ public class FserveApp : IServerApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        var cacheKey = requestContext.RequestSourceThumbprintHex;
         if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
         {
-            appContext.Logger?.LogDebug("AuthUserBegin received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogDebug("AuthUserBegin received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", requestContext.RequestSourceThumbprintHex);
             return true;
         }
 
-        appContext.Logger?.LogDebug("AuthUserBegin from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+        appContext.Logger?.LogDebug("AuthUserBegin from {SourceThumbprint} via {PeerShortName}", requestContext.RequestSourceThumbprintHex, requestContext.PeerShortName);
 
         // TODO: User authentication.
 
@@ -366,7 +366,7 @@ public class FserveApp : IServerApp
             // This . add if not root, or base name if root
             if (relativeDirName == ".")
             {
-                nodes.Add(realCurrent, new TreeNode
+                var newNode = new TreeNode
                 {
                     RelativeName = ".",
                     RelativePath = relativeMountPath,
@@ -377,8 +377,12 @@ public class FserveApp : IServerApp
                     Size = 0,
                     DescendentSize = 0,
                     LastModified = diRealCurrent.LastWriteTimeUtc,
-                    UnixFileMode = diRealCurrent.UnixFileMode.ApplyUmask(umask),
-                });
+                    UnixFileMode = (int)diRealCurrent.UnixFileMode == -1
+                        ? UnixFileMode.None
+                        : diRealCurrent.UnixFileMode.ApplyUmask(umask),
+                };
+                if (newNode.UnixFileMode != UnixFileMode.None)
+                    nodes.Add(realCurrent, newNode);
             }
 
             // Parent ..
@@ -393,20 +397,26 @@ public class FserveApp : IServerApp
                         ? mountPoint
                         : Path.Combine(mountPoint, relParentPath);
 
-                    nodes.Add(parent.FullName, new TreeNode
+                    var newNode = new TreeNode
                     {
                         RelativeName = "..",
                         RelativePath = relMountParentPath,
-                        AbsolutePath = parent.FullName,
+                        AbsolutePath = parent.LinkTarget ?? parent.FullName,
                         Children = null,
                         Count = 0,
                         DescendentCount = 0,
                         Size = uint.MaxValue,
                         DescendentSize = 0,
                         LastModified = parent.LastWriteTimeUtc,
-                        UnixFileMode = parent.UnixFileMode.ApplyUmask(umask),
-                    });
-                    vcount++;
+                        UnixFileMode = (int)parent.UnixFileMode == -1
+                            ? UnixFileMode.None
+                            : parent.UnixFileMode.ApplyUmask(umask),
+                    };
+                    if (newNode.UnixFileMode != UnixFileMode.None)
+                    {
+                        nodes.Add(parent.FullName, newNode);
+                        vcount++;
+                    }
                 }
             }
             else
@@ -461,19 +471,23 @@ public class FserveApp : IServerApp
                         var relFileName = Path.GetFileName(relFilePath);
                         var fi = new FileInfo(file);
                         var size = (uint)fi.Length;
-                        nodes.Add(file, new TreeNode
+                        var newNode = new TreeNode
                         {
                             RelativeName = relFileName,
                             RelativePath = relFilePath,
-                            AbsolutePath = fi.FullName,
+                            AbsolutePath = fi.LinkTarget ?? fi.FullName,
                             Children = null,
                             Count = 0,
                             DescendentCount = 0,
                             Size = size,
                             DescendentSize = size,
                             LastModified = fi.LastWriteTimeUtc,
-                            UnixFileMode = fi.UnixFileMode.ApplyUmask(umask),
-                        });
+                            UnixFileMode = (int)fi.UnixFileMode == -1
+                                ? UnixFileMode.None
+                                : fi.UnixFileMode.ApplyUmask(umask),
+                        };
+                        if (newNode.UnixFileMode != UnixFileMode.None)
+                            nodes.Add(file, newNode);
                     }
                 }
                 catch (DirectoryNotFoundException)
@@ -512,7 +526,9 @@ public class FserveApp : IServerApp
             Size = (uint)nodes.Count, // Directories have no inherent size
             DescendentSize = 0, // Set following this statement
             LastModified = diRealCurrent.LastWriteTimeUtc,
-            UnixFileMode = diRealCurrent.UnixFileMode.ApplyUmask(umask),
+            UnixFileMode = (int)diRealCurrent.UnixFileMode == -1
+                ? UnixFileMode.None
+                : diRealCurrent.UnixFileMode.ApplyUmask(umask),
         };
         virtualRoot.Add(relMountPath, ret);
 
@@ -530,14 +546,14 @@ public class FserveApp : IServerApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        var cacheKey = requestContext.RequestSourceThumbprintHex;
         if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
         {
-            appContext.Logger?.LogDebug("ListRequest received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogDebug("ListRequest received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", requestContext.RequestSourceThumbprintHex);
             return true;
         }
 
-        appContext.Logger?.LogDebug("ListRequest from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+        appContext.Logger?.LogDebug("ListRequest from {SourceThumbprint} via {PeerShortName}", requestContext.RequestSourceThumbprintHex, requestContext.PeerShortName);
 
         // TODO: Search pattern visitor pattern
 
@@ -574,7 +590,8 @@ public class FserveApp : IServerApp
                 Name = c.Value.RelativeName,
                 Size = c.Value.Size,
                 Modified = c.Value.LastModified == null ? null : Timestamp.FromDateTimeOffset(c.Value.LastModified.Value),
-                Mode = (uint)c.Value.UnixFileMode
+                Mode = (uint)c.Value.UnixFileMode,
+                IsDirectory = c.Value.Children != null,
             }));
         }
 
@@ -592,14 +609,14 @@ public class FserveApp : IServerApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        var cacheKey = requestContext.RequestSourceThumbprintHex;
         if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
         {
-            appContext.Logger?.LogDebug("ChangeDirectoryRequest received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogDebug("ChangeDirectoryRequest received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", requestContext.RequestSourceThumbprintHex);
             return true;
         }
 
-        appContext.Logger?.LogDebug("ChangeDirectoryRequest from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+        appContext.Logger?.LogDebug("ChangeDirectoryRequest from {SourceThumbprint} via {PeerShortName}", requestContext.RequestSourceThumbprintHex, requestContext.PeerShortName);
 
         // Build tree if it hasn't already been built.
         logicalRootNode ??= BuildLogicalDirectoryTree();
@@ -681,14 +698,14 @@ public class FserveApp : IServerApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        var cacheKey = requestContext.RequestSourceThumbprintHex;
         if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
         {
-            appContext.Logger?.LogDebug("PrepareDownload received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogDebug("PrepareDownload received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", requestContext.RequestSourceThumbprintHex);
             return true;
         }
 
-        appContext.Logger?.LogDebug("PrepareDownload from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+        appContext.Logger?.LogDebug("PrepareDownload from {SourceThumbprint} via {PeerShortName}", requestContext.RequestSourceThumbprintHex, requestContext.PeerShortName);
 
         // Build tree if it hasn't already been built.
         logicalRootNode ??= BuildLogicalDirectoryTree();
@@ -755,6 +772,21 @@ public class FserveApp : IServerApp
 
             fileTreeNode = virtChild.Value.Value;
         }
+
+        // Do not allow prepare if no o=r permission
+        if (!fileTreeNode.UnixFileMode.HasFlag(UnixFileMode.OtherRead))
+            return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
+                appContext,
+                        new Status
+                        {
+                            Operation = Operation.Cd,
+                            StatusCode = 403,
+                            StatusMessage = $"{fileTreeNode.RelativePath} Permission denied",
+                            ResultPayload = ByteString.Empty
+                        },
+                cc.SessionSharedKey), cancellationToken);
+
+        
 
         var fi = new FileInfo(fileTreeNode.AbsolutePath);
         var ticket = $"luxelot-fs-{requestContext.PeerShortName}-{Guid.NewGuid()}";
@@ -824,7 +856,7 @@ public class FserveApp : IServerApp
             Hash = ByteString.CopyFrom([.. c.chunkInfo.ChunkHash])
         }));
 
-        ServerChunks.TryAdd(ticket, [.. localChunks]);
+        ServerChunks.TryAdd((requestContext.RequestSourceThumbprintHex, ticket), [.. localChunks]);
         appContext.Logger?.LogDebug("File {Filename} carved into {ChunkCount} chunks for peer {PeerShortName} with ticket {Ticket}", fileTreeNode.AbsolutePath, localChunks.Count, requestContext.PeerShortName, ticket);
 
         return await appContext.SendMessage(requestContext.RequestSourceThumbprint, FrameUtils.WrapServerFrame(
@@ -841,24 +873,24 @@ public class FserveApp : IServerApp
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
 
-        var cacheKey = DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint);
+        var cacheKey = requestContext.RequestSourceThumbprintHex;
         if (!ClientConnections.TryGetValue(cacheKey, out ClientConnection? cc))
         {
-            appContext.Logger?.LogDebug("GetChunk received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogDebug("GetChunk received from {SourceThumbprint}, but not recorded as a client connection. Ignoring.", cacheKey);
             return true;
         }
 
-        appContext.Logger?.LogDebug("GetChunk from {SourceThumbprint} via {PeerShortName}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), requestContext.PeerShortName);
+        appContext.Logger?.LogDebug("GetChunk from {SourceThumbprint} via {PeerShortName}", cacheKey, requestContext.PeerShortName);
 
-        if (!ServerChunks.TryGetValue(cr.DownloadTicket, out (ChunkInfo chunkInfo, string chunkFileName)[]? chunks))
+        if (!ServerChunks.TryGetValue((cacheKey, cr.DownloadTicket), out (ChunkInfo chunkInfo, string chunkFileName)[]? chunks))
         {
-            appContext.Logger?.LogDebug("Get chunk from {SourceThumbprint} referenced unknown download ticket {Ticket}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), cr.DownloadTicket);
+            appContext.Logger?.LogDebug("Get chunk from {SourceThumbprint} referenced unknown download ticket {Ticket}. Ignoring.", cacheKey, cr.DownloadTicket);
             return true;
         }
 
         if (cr.ChunkSeq < 1 || cr.ChunkSeq > chunks.Length)
         {
-            appContext.Logger?.LogDebug("Get chunk from {SourceThumbprint} for ticket {Ticket} referenced invalid chunk sequence {Sequence}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), cr.DownloadTicket, cr.ChunkSeq);
+            appContext.Logger?.LogDebug("Get chunk from {SourceThumbprint} for ticket {Ticket} referenced invalid chunk sequence {Sequence}. Ignoring.", cacheKey, cr.DownloadTicket, cr.ChunkSeq);
             return true;
         }
 

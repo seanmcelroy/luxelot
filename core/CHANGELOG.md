@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5 - 2024-11-27
+
+### Changed
+
+- Improved error messaging when loadable app subcommands fail
+
 ## 1.4 - 2024-11-26
 
 ### Changed

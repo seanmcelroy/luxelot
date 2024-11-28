@@ -26,16 +26,13 @@ public class ListCommand : IConsoleCommand
         this.appContext = appContext;
     }
 
-    public async Task<bool> Invoke(string[] words, CancellationToken cancellationToken)
+    public async Task<(bool success, string? errorMessage)> Invoke(string[] words, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
         if (words.Length != 1 && words.Length != 2)
-        {
-            await appContext.SendConsoleMessage($"FSLIST command requires zero or one argument, the optional directory to list.", cancellationToken);
-            return false;
-        }
+            return (false, "Command requires zero or one argument, the optional directory to list.");
 
         var directory = words.Length == 1 ? null : words[1];
 
@@ -43,10 +40,9 @@ public class ListCommand : IConsoleCommand
             || fileClientApp == null)
         {
             appContext.Logger?.LogError("Unable to get singleton for file client");
-            await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
-            return false;
+            return (false, "Internal error.");
         }
 
-        return await fileClientApp.SendListRequest(directory, cancellationToken);
+        return (await fileClientApp.SendListRequest(directory, cancellationToken), null);
     }
 }

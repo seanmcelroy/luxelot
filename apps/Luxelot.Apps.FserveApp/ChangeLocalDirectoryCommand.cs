@@ -37,16 +37,13 @@ public class ChangeLocalDirectoryCommand : IConsoleCommand
         appContext.AddOrUpdate(LOCAL_WORKING_DIRECTORY, GetDefaultDownloadDirectory());
     }
 
-    public async Task<bool> Invoke(string[] words, CancellationToken cancellationToken)
+    public async Task<(bool success, string? errorMessage)> Invoke(string[] words, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
         if (words.Length != 1 && words.Length != 2)
-        {
-            await appContext.SendConsoleMessage($"Command requires one argument, the directory to select.", cancellationToken);
-            return false;
-        }
+            return (false, "Command requires one argument, the directory to select.");
 
         var directory = words.Length == 1 ? GetDefaultDownloadDirectory() : words[1..].Aggregate((c, n) => $"{c} {n}");
 
@@ -54,28 +51,22 @@ public class ChangeLocalDirectoryCommand : IConsoleCommand
             || fileClientApp == null)
         {
             appContext.Logger?.LogError("Unable to get singleton for file client");
-            await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
-            return false;
+            return (false, "Internal error.");
         }
 
         if (!Directory.Exists(directory))
-        {
-            await appContext.SendConsoleMessage($"ERROR: No such directory '{directory}'", cancellationToken);
-            return true;
-        }
+            return (false, "No such directory '{directory}'");
 
         try
         {
             var dir = Path.GetFullPath(directory);
             appContext.AddOrUpdate(LOCAL_WORKING_DIRECTORY, dir);
-            await appContext.SendConsoleMessage($"Local directory changed to: '{dir}'", cancellationToken);
-            return true;
+            return (true, "Local directory changed to: '{dir}'");
         }
         catch (Exception ex)
         {
             appContext.Logger?.LogWarning(ex, "Unable to parse directory '{Directory} into a full path.", directory);
-            await appContext.SendConsoleMessage($"Unrecognized directory: '{directory}'", cancellationToken);
-            return true;
+            return (false, $"Unrecognized directory: '{directory}'");
         }
     }
 }

@@ -15,7 +15,7 @@ public class TreeNode
         DescendentSize = uint.MaxValue,
         Children = null,
         LastModified = DateTimeOffset.UtcNow,
-        UnixFileMode = UnixFileMode.None,
+        UnixFileMode = UnixFileMode.UserRead & UnixFileMode.GroupRead & UnixFileMode.OtherRead,
     };
 
     public required string RelativeName { get; init; }

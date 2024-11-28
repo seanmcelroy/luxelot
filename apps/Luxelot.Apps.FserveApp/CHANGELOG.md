@@ -2,9 +2,16 @@
 
 ## 1.4 - 2024-11-27
 
+### Changed
+
+- `fslist` follows symbolic link targets, as applicable
+- `fslist` no longer shows results to special device or other files without permission bits
+- `fslist` no longer shows results with zero permissions set (mode=000 with any umask applied)
+- `fsprepare` no longer allows preparing files for download if they lack mode o=r (others can read)
+
 ### Added
 
-- File permissions are now provided in `fslist` results
+- `fslist` shows *nix mode permission bits and will show 'd' to indicate directories
 - Umask configuration applied to display results
 
 ## 1.3 - 2024-11-26

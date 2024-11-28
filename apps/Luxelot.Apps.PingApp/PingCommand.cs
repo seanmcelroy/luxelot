@@ -28,34 +28,25 @@ public class PingCommand : IConsoleCommand
         this.appContext = appContext;
     }
 
-    public async Task<bool> Invoke(string[] words, CancellationToken cancellationToken)
+    public async Task<(bool success, string? errorMessage)> Invoke(string[] words, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
         if (words.Length != 2 && words.Length != 3)
-        {
-            await appContext.SendConsoleMessage($"Command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.", cancellationToken);
-            return false;
-        }
+            return (false, "Command requires one or two arguments, the peer short name to direct the ping, and optionally a second parameter which is the THUMBPRINT for the actual intended recipient if different and you want to source route it.");
 
         var routingPeerShortName = words[1];
         var routingPeerThumbprint = appContext.FindPeerThumbprintByShortName(routingPeerShortName);
         if (routingPeerThumbprint == null)
-        {
-            await appContext.SendConsoleMessage($"No peer found with name '{routingPeerShortName}'.", cancellationToken);
-            return false;
-        }
+            return (false, $"No peer found with name '{routingPeerShortName}'.");
 
         ImmutableArray<byte>? ultimateDestinationThumbprint = null;
         if (words.Length == 3)
         {
             ultimateDestinationThumbprint = [.. DisplayUtils.HexToBytes(words[2])];
             if (ultimateDestinationThumbprint.Value.Length != Constants.THUMBPRINT_LEN)
-            {
-                await appContext.SendConsoleMessage($"Invalid THUMBPRINT for the intended recipient.  Thumbprints are {Constants.THUMBPRINT_LEN} bytes.", cancellationToken);
-                return false;
-            }
+                return (false, $"Invalid THUMBPRINT for the intended recipient.  Thumbprints are {Constants.THUMBPRINT_LEN} bytes.");
         }
         ultimateDestinationThumbprint ??= routingPeerThumbprint;
 
@@ -74,11 +65,12 @@ public class PingCommand : IConsoleCommand
                 appContext.Logger?.LogInformation("PING to {PeerShortName}: {Contents}", routingPeerShortName, $"id={ping.Identifier} seq={ping.Sequence}");
             else
                 appContext.Logger?.LogInformation("PING to {PeerShortName} with final destination of {DestinationThumbprint}: {Contents}", routingPeerShortName, DisplayUtils.BytesToHex(ultimateDestinationThumbprint.Value), $"id={ping.Identifier} seq={ping.Sequence}");
+            return (success, null);
         }
         else
         {
             appContext.Logger?.LogError("ERROR sending PING to {PeerShortName}", routingPeerShortName);
+            return (false, $"Error sending PING to {routingPeerShortName}");
         }
-        return success;
     }
 }

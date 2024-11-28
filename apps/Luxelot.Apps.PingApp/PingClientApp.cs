@@ -54,16 +54,16 @@ public class PingClientApp : IClientApp
         await appContext.SendConsoleMessage($"{Name} {version}", cancellationToken);
     }
 
-    public async Task<(bool handled, bool success)> TryInvokeCommand(string command, string[] words, CancellationToken cancellationToken)
+    public async Task<(bool handled, bool success, string? errorMessage)> TryInvokeCommand(string command, string[] words, CancellationToken cancellationToken)
     {
         var appCommand = Commands.FirstOrDefault(cc => string.Compare(cc.FullCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
         if (appCommand == null)
-            return (false, false);
-        var success = await appCommand.Invoke(words, cancellationToken);
-        return (true, success);
+            return (false, false, null);
+        var (success, errorMessage) = await appCommand.Invoke(words, cancellationToken);
+        return (true, success, errorMessage);
     }
 
-    public async Task<bool> HandleUserInput(string input, CancellationToken cancellationToken)
+    public async Task<HandleUserInputResult> HandleUserInput(string input, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(input);
@@ -82,21 +82,42 @@ public class PingClientApp : IClientApp
                 sb.AppendLine($"{InteractiveCommand}> {built_in_cmds.Order().Aggregate((c, n) => $"{c}{Environment.NewLine}{InteractiveCommand}> {n}")}");
                 sb.AppendLine($"{InteractiveCommand}> END OF COMMAND LIST{Environment.NewLine}");
                 await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
-                return true;
+                return new HandleUserInputResult
+                {
+                    Success = true,
+                    ErrorMessage = null,
+                    Command = null
+                };
 
             case "version":
                 var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
                 await appContext.SendConsoleMessage($"{Name} v{version}", cancellationToken);
-                return true;
+                return new HandleUserInputResult
+                {
+                    Success = true,
+                    ErrorMessage = null,
+                    Command = null
+                };
 
             case "ping":
-                var ping = new PingCommand();
-                ping.OnInitialize(appContext);
-                return await ping.Invoke(words, cancellationToken);
+                var pingCommand = new PingCommand();
+                pingCommand.OnInitialize(appContext);
+
+                var (success, errorMessage) = await pingCommand.Invoke(words, cancellationToken);
+                return new HandleUserInputResult
+                {
+                    Success = success,
+                    ErrorMessage = errorMessage,
+                    Command = pingCommand
+                };
 
             default:
-                await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command '{command.Trim()}'. Type 'exit' to exit this app.", cancellationToken);
-                return false;
+                return new HandleUserInputResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Unknown command '{command.Trim()}'. Type 'exit' to exit this app.",
+                    Command = null
+                };
         }
     }
 

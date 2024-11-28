@@ -10,4 +10,5 @@ public interface IRequestContext
     public EndPoint RemoteEndPoint { get; }
 
     public ImmutableArray<byte> RequestSourceThumbprint { get; }
+    public string RequestSourceThumbprintHex { get => DisplayUtils.BytesToHex(RequestSourceThumbprint); }
 }

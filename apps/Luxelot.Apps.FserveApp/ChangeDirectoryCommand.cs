@@ -25,16 +25,13 @@ public class ChangeDirectoryCommand : IConsoleCommand
         this.appContext = appContext;
     }
 
-    public async Task<bool> Invoke(string[] words, CancellationToken cancellationToken)
+    public async Task<(bool success, string? errorMessage)> Invoke(string[] words, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
         if (words.Length != 2)
-        {
-            await appContext.SendConsoleMessage($"Command requires one argument, the directory to select.", cancellationToken);
-            return false;
-        }
+            return (false, "Command requires one argument, the directory to select.");
 
         var directory = words.Length == 1 ? "/" : words[1];
 
@@ -42,8 +39,7 @@ public class ChangeDirectoryCommand : IConsoleCommand
             || fileClientApp == null)
         {
             appContext.Logger?.LogError("Unable to get singleton for file client");
-            await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
-            return false;
+            return (false, "Internal error.");
         }
 
         return await fileClientApp.SendChangeDirectoryRequest(directory, cancellationToken);

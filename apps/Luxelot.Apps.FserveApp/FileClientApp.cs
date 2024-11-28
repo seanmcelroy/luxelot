@@ -104,13 +104,13 @@ public class FileClientApp : IClientApp
         SessionSharedKey = null;// Computed after AuthChannelResponse received
     }
 
-    public async Task<(bool handled, bool success)> TryInvokeCommand(string command, string[] words, CancellationToken cancellationToken)
+    public async Task<(bool handled, bool success, string? errrorMessage)> TryInvokeCommand(string command, string[] words, CancellationToken cancellationToken)
     {
         var appCommand = Commands.FirstOrDefault(cc => string.Compare(cc.FullCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
         if (appCommand == null)
-            return (false, false);
-        var success = await appCommand.Invoke(words, cancellationToken);
-        return (true, success);
+            return (false, false, null);
+        var (success, errorMessage) = await appCommand.Invoke(words, cancellationToken);
+        return (true, success, errorMessage);
     }
 
     public async Task<bool> SendAuthChannelBegin(ImmutableArray<byte> destinationThumbprint, string username, CancellationToken cancellationToken)
@@ -156,7 +156,7 @@ public class FileClientApp : IClientApp
         return await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken);
     }
 
-    public async Task<bool> SendChangeDirectoryRequest(string directory, CancellationToken cancellationToken)
+    public async Task<(bool success, string? errorMessage)> SendChangeDirectoryRequest(string directory, CancellationToken cancellationToken)
     {
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
@@ -164,8 +164,7 @@ public class FileClientApp : IClientApp
         if (ServerThumbprint == null || SessionSharedKey == null)
         {
             appContext.Logger?.LogInformation("Change directory failed, no connection to a server");
-            await appContext.SendConsoleMessage($"Not connected to an fserve.", cancellationToken);
-            return false;
+            return (false, "Not connected to an fserve.");
         }
 
         var frame = FrameUtils.WrapClientFrame(
@@ -176,7 +175,7 @@ public class FileClientApp : IClientApp
             },
             SessionSharedKey.Value);
 
-        return await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken);
+        return (await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken), null);
     }
 
     public async Task<bool> SendPrepareDownloadRequest(string file, CancellationToken cancellationToken)
@@ -271,13 +270,13 @@ public class FileClientApp : IClientApp
 
         if (ServerThumbprint == null)
         {
-            appContext.Logger?.LogError("FSERVE AuthChannelResponse received from {SourceThumbprint}, but not currently connected. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogError("FSERVE AuthChannelResponse received from {SourceThumbprint}, but not currently connected. Ignoring.", requestContext.RequestSourceThumbprintHex);
             return true;
         }
 
         if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
         {
-            appContext.Logger?.LogError("FSERVE AuthChannelResponse received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), DisplayUtils.BytesToHex(ServerThumbprint));
+            appContext.Logger?.LogError("FSERVE AuthChannelResponse received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, DisplayUtils.BytesToHex(ServerThumbprint));
             return true;
         }
 
@@ -289,7 +288,7 @@ public class FileClientApp : IClientApp
         SessionSharedKey = appContext.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. acr.CipherText], appContext.Logger);
 
         //appContext.Logger?.LogCritical("CLIENT FSERV SESSION KEY: {SessionSharedKey}", DisplayUtils.BytesToHex(SessionSharedKey));
-        appContext.Logger?.LogInformation("FSERVE AuthChannelResponse received from {SourceThumbprint}. Session shared key established.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+        appContext.Logger?.LogInformation("FSERVE AuthChannelResponse received from {SourceThumbprint}. Session shared key established.", requestContext.RequestSourceThumbprintHex);
 
         appContext.TryAddDhtEntry(ServerThumbprint.Value, new NodeEntry { IdentityPublicKey = [.. acr.IdPubKey.ToByteArray()], RemoteEndpoint = null });
 
@@ -318,16 +317,16 @@ public class FileClientApp : IClientApp
 
         if (ServerThumbprint == null)
         {
-            appContext.Logger?.LogError("FSERVE Status received from {SourceThumbprint}, but not currently connected. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogError("FSERVE Status received from {SourceThumbprint}, but not currently connected. Ignoring.", requestContext.RequestSourceThumbprintHex);
             return true;
         }
 
         if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
         {
-            appContext.Logger?.LogError("FSERVE Status received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), DisplayUtils.BytesToHex(ServerThumbprint));
+            appContext.Logger?.LogError("FSERVE Status received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, DisplayUtils.BytesToHex(ServerThumbprint));
             return true;
         }
-        appContext.Logger?.LogInformation("FSERVE Status received from {SourceThumbprint}: {StatusCode} {StatusMessage}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), status.StatusCode, status.StatusMessage);
+        appContext.Logger?.LogInformation("FSERVE Status received from {SourceThumbprint}: {StatusCode} {StatusMessage}", requestContext.RequestSourceThumbprintHex, status.StatusCode, status.StatusMessage);
 
         switch (status.Operation)
         {
@@ -353,16 +352,16 @@ public class FileClientApp : IClientApp
 
         if (ServerThumbprint == null)
         {
-            appContext.Logger?.LogError("Received from {SourceThumbprint}, but not currently connected. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but not currently connected. Ignoring.", requestContext.RequestSourceThumbprintHex);
             return true;
         }
 
         if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
         {
-            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), DisplayUtils.BytesToHex(ServerThumbprint));
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, DisplayUtils.BytesToHex(ServerThumbprint));
             return true;
         }
-        appContext.Logger?.LogInformation("Received from {SourceThumbprint}: {StatusCode} {StatusMessage}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), listResponse.StatusCode, listResponse.StatusMessage);
+        appContext.Logger?.LogInformation("Received from {SourceThumbprint}: {StatusCode} {StatusMessage}", requestContext.RequestSourceThumbprintHex, listResponse.StatusCode, listResponse.StatusMessage);
 
         var sb = new StringBuilder();
         sb.AppendLine($"Listing for '{listResponse.Directory}': {listResponse.StatusCode}");
@@ -371,7 +370,7 @@ public class FileClientApp : IClientApp
             var size_len = listResponse.Results.Max(r => r.Size.ToString().Length);
             foreach (var result in listResponse.Results)
             {
-                sb.AppendFormat("{0} {1:MMM dd HH:mm} {2} {3}\r\n", DisplayUtils.UnixFileModeToString(result.Mode, false), result.Modified.ToDateTimeOffset(), result.Size.ToString().PadLeft(size_len), result.Name);
+                sb.AppendFormat("{0} {1:MMM dd HH:mm} {2} {3}\r\n", DisplayUtils.UnixFileModeToString(result.Mode, result.IsDirectory), result.Modified.ToDateTimeOffset(), result.Size.ToString().PadLeft(size_len), result.Name);
             }
         }
         sb.AppendLine("End of List");
@@ -391,16 +390,16 @@ public class FileClientApp : IClientApp
 
         if (ServerThumbprint == null)
         {
-            appContext.Logger?.LogError("Received from {SourceThumbprint}, but not currently connected. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint));
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but not currently connected. Ignoring.", requestContext.RequestSourceThumbprintHex);
             return true;
         }
 
         if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
         {
-            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), DisplayUtils.BytesToHex(ServerThumbprint));
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, DisplayUtils.BytesToHex(ServerThumbprint));
             return true;
         }
-        appContext.Logger?.LogInformation("Received from {SourceThumbprint}: Download ready for {Filename} via ticket {Ticket}", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), dr.File, dr.Ticket);
+        appContext.Logger?.LogInformation("Received from {SourceThumbprint}: Download ready for {Filename} via ticket {Ticket}", requestContext.RequestSourceThumbprintHex, dr.File, dr.Ticket);
 
         List<ChunkInfo> remoteChunks =
         [
@@ -421,12 +420,12 @@ public class FileClientApp : IClientApp
         // Did we get all the chunks?
         if (remoteChunks.Count != dr.ChunkCount)
         {
-            appContext.Logger?.LogError("Received incomplete chunk list from {SourceThumbprint} for ticket {Ticket}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), dr.Ticket);
+            appContext.Logger?.LogError("Received incomplete chunk list from {SourceThumbprint} for ticket {Ticket}. Ignoring.", requestContext.RequestSourceThumbprintHex, dr.Ticket);
             return true;
         }
         if (Enumerable.Range(1, (int)dr.ChunkCount).Sum() != remoteChunks.Sum(c => c.ChunkSequence))
         {
-            appContext.Logger?.LogError("Inconsistent chunk sequence list from {SourceThumbprint} for ticket {Ticket}. Ignoring.", DisplayUtils.BytesToHex(requestContext.RequestSourceThumbprint), dr.Ticket);
+            appContext.Logger?.LogError("Inconsistent chunk sequence list from {SourceThumbprint} for ticket {Ticket}. Ignoring.", requestContext.RequestSourceThumbprintHex, dr.Ticket);
             return true;
         }
 
@@ -628,7 +627,7 @@ public class FileClientApp : IClientApp
         await appContext.SendMessage(ServerThumbprint.Value, frame, cancellationToken);
         return true;
     }
-    public async Task<bool> HandleUserInput(string input, CancellationToken cancellationToken)
+    public async Task<HandleUserInputResult> HandleUserInput(string input, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(input);
@@ -640,8 +639,12 @@ public class FileClientApp : IClientApp
             || ca == null)
         {
             appContext.Logger?.LogError("Unable to get singleton for file client");
-            await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
-            return false;
+            return new HandleUserInputResult
+            {
+                Success = false,
+                ErrorMessage = "Internal error.",
+                Command = null
+            };
         }
 
         var sb = new StringBuilder();
@@ -657,28 +660,46 @@ public class FileClientApp : IClientApp
                 sb.AppendLine($"{InteractiveCommand}> {built_in_cmds.Union(loaded_cmds).Order().Aggregate((c, n) => $"{c}\r\n{InteractiveCommand}> {n}")}");
                 sb.AppendLine($"{InteractiveCommand}> END OF COMMAND LIST").AppendLine();
                 await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
-                return true;
+                return new HandleUserInputResult
+                {
+                    Success = true,
+                    ErrorMessage = null,
+                    Command = null
+                };
 
             case "version":
                 var version = Assembly.GetExecutingAssembly().GetName().Version;
                 await appContext.SendConsoleMessage($"{Name} app v{version}", cancellationToken);
-                return true;
+                return new HandleUserInputResult
+                {
+                    Success = true,
+                    ErrorMessage = null,
+                    Command = null
+                };
 
             default:
                 // Maybe it's a command this client app loaded?
                 var appCommand = ca.Commands.FirstOrDefault(cc =>
                     string.Compare(cc.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0
                     || cc.InteractiveAliases.Any(a => string.Compare(a, command, StringComparison.InvariantCultureIgnoreCase) == 0));
+
                 if (appCommand != null)
                 {
-                    var success = await appCommand.Invoke(words, cancellationToken);
-                    if (success)
-                        return true;
-                    await appContext.SendConsoleMessage($"ERROR: {appCommand.FullCommand}", cancellationToken);
+                    var (success, errorMessage) = await appCommand.Invoke(words, cancellationToken);
+                    return new HandleUserInputResult
+                    {
+                        Success = success,
+                        ErrorMessage = errorMessage,
+                        Command = appCommand
+                    };
                 }
-                else
-                    await appContext.SendConsoleMessage($"{InteractiveCommand}> Unknown command '{command.Trim()}'. Type 'exit' to exit this app.", cancellationToken);
-                return false;
+
+                return new HandleUserInputResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Unknown command '{command.Trim()}'. Type 'exit' to exit this app.",
+                    Command = null
+                };
         }
     }
 

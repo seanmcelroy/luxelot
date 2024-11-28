@@ -27,23 +27,22 @@ namespace Luxelot.Apps.FserveApp.Messages {
             "ChNsaXN0X3Jlc3BvbnNlLnByb3RvGh9nb29nbGUvcHJvdG9idWYvdGltZXN0",
             "YW1wLnByb3RvInkKDExpc3RSZXNwb25zZRITCgtzdGF0dXNfY29kZRgBIAEo",
             "BRIWCg5zdGF0dXNfbWVzc2FnZRgCIAEoCRIRCglkaXJlY3RvcnkYAyABKAkS",
-            "DwoHcGF0dGVybhgEIAEoCRIYCgdyZXN1bHRzGAUgAygLMgcuUmVzdWx0InIK",
-            "BlJlc3VsdBIMCgRuYW1lGAEgASgJEgwKBHNpemUYAiABKA0SMQoIbW9kaWZp",
-            "ZWQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQESDAoE",
-            "bW9kZRgEIAEoDUILCglfbW9kaWZpZWRCIqoCH0x1eGVsb3QuQXBwcy5Gc2Vy",
-            "dmVBcHAuTWVzc2FnZXNiBnByb3RvMw=="));
+            "DwoHcGF0dGVybhgEIAEoCRIYCgdyZXN1bHRzGAUgAygLMgcuUmVzdWx0IogB",
+            "CgZSZXN1bHQSDAoEbmFtZRgBIAEoCRIMCgRzaXplGAIgASgNEjEKCG1vZGlm",
+            "aWVkGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgAiAEBEgwK",
+            "BG1vZGUYBCABKA0SFAoMaXNfZGlyZWN0b3J5GAUgASgIQgsKCV9tb2RpZmll",
+            "ZEIiqgIfTHV4ZWxvdC5BcHBzLkZzZXJ2ZUFwcC5NZXNzYWdlc2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { global::Google.Protobuf.WellKnownTypes.TimestampReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.ListResponse), global::Luxelot.Apps.FserveApp.Messages.ListResponse.Parser, new[]{ "StatusCode", "StatusMessage", "Directory", "Pattern", "Results" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.Result), global::Luxelot.Apps.FserveApp.Messages.Result.Parser, new[]{ "Name", "Size", "Modified", "Mode" }, new[]{ "Modified" }, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.FserveApp.Messages.Result), global::Luxelot.Apps.FserveApp.Messages.Result.Parser, new[]{ "Name", "Size", "Modified", "Mode", "IsDirectory" }, new[]{ "Modified" }, null, null, null)
           }));
     }
     #endregion
 
   }
   #region Messages
-  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class ListResponse : pb::IMessage<ListResponse>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -304,11 +303,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-      if ((tag & 7) == 4) {
-        // Abort on any end group tag.
-        return;
-      }
-      switch(tag) {
+        switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -343,11 +338,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-      if ((tag & 7) == 4) {
-        // Abort on any end group tag.
-        return;
-      }
-      switch(tag) {
+        switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -378,7 +369,6 @@ namespace Luxelot.Apps.FserveApp.Messages {
 
   }
 
-  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class Result : pb::IMessage<Result>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       , pb::IBufferMessage
@@ -417,6 +407,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       size_ = other.size_;
       modified_ = other.modified_ != null ? other.modified_.Clone() : null;
       mode_ = other.mode_;
+      isDirectory_ = other.isDirectory_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -474,6 +465,18 @@ namespace Luxelot.Apps.FserveApp.Messages {
       }
     }
 
+    /// <summary>Field number for the "is_directory" field.</summary>
+    public const int IsDirectoryFieldNumber = 5;
+    private bool isDirectory_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool IsDirectory {
+      get { return isDirectory_; }
+      set {
+        isDirectory_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -493,6 +496,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       if (Size != other.Size) return false;
       if (!object.Equals(Modified, other.Modified)) return false;
       if (Mode != other.Mode) return false;
+      if (IsDirectory != other.IsDirectory) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -504,6 +508,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
       if (Size != 0) hash ^= Size.GetHashCode();
       if (modified_ != null) hash ^= Modified.GetHashCode();
       if (Mode != 0) hash ^= Mode.GetHashCode();
+      if (IsDirectory != false) hash ^= IsDirectory.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -538,6 +543,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
         output.WriteRawTag(32);
         output.WriteUInt32(Mode);
       }
+      if (IsDirectory != false) {
+        output.WriteRawTag(40);
+        output.WriteBool(IsDirectory);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -564,6 +573,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
         output.WriteRawTag(32);
         output.WriteUInt32(Mode);
       }
+      if (IsDirectory != false) {
+        output.WriteRawTag(40);
+        output.WriteBool(IsDirectory);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -585,6 +598,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
       }
       if (Mode != 0) {
         size += 1 + pb::CodedOutputStream.ComputeUInt32Size(Mode);
+      }
+      if (IsDirectory != false) {
+        size += 1 + 1;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -613,6 +629,9 @@ namespace Luxelot.Apps.FserveApp.Messages {
       if (other.Mode != 0) {
         Mode = other.Mode;
       }
+      if (other.IsDirectory != false) {
+        IsDirectory = other.IsDirectory;
+      }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -624,11 +643,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     #else
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-      if ((tag & 7) == 4) {
-        // Abort on any end group tag.
-        return;
-      }
-      switch(tag) {
+        switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
@@ -651,6 +666,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
             Mode = input.ReadUInt32();
             break;
           }
+          case 40: {
+            IsDirectory = input.ReadBool();
+            break;
+          }
         }
       }
     #endif
@@ -662,11 +681,7 @@ namespace Luxelot.Apps.FserveApp.Messages {
     void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
       uint tag;
       while ((tag = input.ReadTag()) != 0) {
-      if ((tag & 7) == 4) {
-        // Abort on any end group tag.
-        return;
-      }
-      switch(tag) {
+        switch(tag) {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
@@ -687,6 +702,10 @@ namespace Luxelot.Apps.FserveApp.Messages {
           }
           case 32: {
             Mode = input.ReadUInt32();
+            break;
+          }
+          case 40: {
+            IsDirectory = input.ReadBool();
             break;
           }
         }

@@ -21,6 +21,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Generators;
+using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 using static Luxelot.Apps.Common.RegexUtils;
 
@@ -339,6 +340,7 @@ public class Node
 
     public void LoadApp(IHost host, string appPath)
     {
+        ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(appPath);
 
         var appContext = new AppContext()
@@ -724,7 +726,23 @@ public class Node
                     ActiveClientApp = null;
                     return;
                 default:
-                    await ActiveClientApp.HandleUserInput(input, cancellationToken);
+                    var result = await ActiveClientApp.HandleUserInput(input, cancellationToken);
+                    if (result.Success)
+                        return;
+                    if (string.IsNullOrWhiteSpace(result.ErrorMessage))
+                    {
+                        if (result.Command != null)
+                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? result.Command.FullCommand : result.Command.InteractiveCommand)}", cancellationToken);
+                        else
+                            await context.WriteLineToUserAsync($"ERROR", cancellationToken);
+                    }
+                    else
+                    {
+                        if (result.Command != null)
+                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? result.Command.FullCommand : result.Command.InteractiveCommand)}: {result.ErrorMessage}", cancellationToken);
+                        else
+                            await context.WriteLineToUserAsync($"ERROR: {result.ErrorMessage}", cancellationToken);
+                    }
                     return;
             }
         }
@@ -894,9 +912,9 @@ public class Node
                     var appCommand = ca.Commands.FirstOrDefault(cc => string.Compare(cc.FullCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
                     if (appCommand != null)
                     {
-                        var success = await appCommand.Invoke(words, cancellationToken);
+                        var (success, errorMessage) = await appCommand.Invoke(words, cancellationToken);
                         if (!success)
-                            await context.WriteLineToUserAsync($"ERROR: {appCommand.FullCommand}", cancellationToken);
+                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? appCommand.FullCommand : appCommand.InteractiveCommand)} {errorMessage}".TrimEnd(), cancellationToken);
                         return;
                     }
                 }

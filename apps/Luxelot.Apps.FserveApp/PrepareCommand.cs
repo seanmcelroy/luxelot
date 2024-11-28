@@ -26,25 +26,21 @@ public class PrepareCommand : IConsoleCommand
         this.appContext = appContext;
     }
 
-    public async Task<bool> Invoke(string[] words, CancellationToken cancellationToken)
+    public async Task<(bool success, string? errorMessage)> Invoke(string[] words, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
         if (words.Length != 2)
-        {
-            await appContext.SendConsoleMessage($"Command requires one argument, the file to prepare for download.", cancellationToken);
-            return false;
-        }
+            return (false, "Command requires one argument, the file to prepare for download.");
 
         if (!appContext.TryGetSingleton(out FileClientApp? fileClientApp)
             || fileClientApp == null)
         {
             appContext.Logger?.LogError("Unable to get singleton for file client");
-            await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
-            return false;
+            return (false, "Internal error.");
         }
 
-        return await fileClientApp.SendPrepareDownloadRequest(words[1], cancellationToken);
+        return (await fileClientApp.SendPrepareDownloadRequest(words[1], cancellationToken), null);
     }
 }

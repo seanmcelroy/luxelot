@@ -26,29 +26,25 @@ public class DownloadCommand : IConsoleCommand
         this.appContext = appContext;
     }
 
-    public async Task<bool> Invoke(string[] words, CancellationToken cancellationToken)
+    public async Task<(bool success, string? errorMessage)> Invoke(string[] words, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
         if (words.Length != 2 && words.Length != 3)
-        {
-            await appContext.SendConsoleMessage($"Command requires one or two arguments, the file to download and optionally the chunk number of the file to retrieve.", cancellationToken);
-            return false;
-        }
+            return (false, "Command requires one or two arguments, the file to download and optionally the chunk number of the file to retrieve.");
 
         if (!appContext.TryGetSingleton(out FileClientApp? fileClientApp)
             || fileClientApp == null)
         {
             appContext.Logger?.LogError("Unable to get singleton for file client");
-            await appContext.SendConsoleMessage($"Internal error.", cancellationToken);
-            return false;
+            return (false, "Internal error.");
         }
 
         uint? chunkNumber = null;
         if (words.Length == 3 && uint.TryParse(words[3], out uint chunkNumber2))
             chunkNumber = chunkNumber2;
 
-        return await fileClientApp.SendDownloadRequests(words[1], chunkNumber, cancellationToken);
+        return (await fileClientApp.SendDownloadRequests(words[1], chunkNumber, cancellationToken), null);
     }
 }
