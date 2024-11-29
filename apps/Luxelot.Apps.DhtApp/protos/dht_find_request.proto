@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Apps.DHT.Messages";
+
+message DhtFindRequest {
+    fixed64 value1 = 1;
+    fixed64 value2 = 2;
+    fixed64 value3 = 3;
+    fixed64 value4 = 4;
+    DhtTableType table_type = 5;
+}
+
+enum DhtTableType {
+    Node = 0;
+    Binary = 1;
+}

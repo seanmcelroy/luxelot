@@ -41,7 +41,7 @@
 
 ### Added
 
-- Replaced simple thumbnail signature cache with Kademila distributed hash table structure
+- Replaced simple thumbprint signature cache with Kademila distributed hash table structure
 - Replaced 'cache' console command with 'dht' console command of equivilant output
 - Added new 'quit' command to end console connection so user does not have to `^C` to exit
 - Added short help descriptions for loadable app commands to the core "help" command

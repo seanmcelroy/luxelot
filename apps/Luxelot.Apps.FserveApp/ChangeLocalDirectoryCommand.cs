@@ -34,7 +34,7 @@ public class ChangeLocalDirectoryCommand : IConsoleCommand
         this.appContext = appContext;
 
 
-        appContext.AddOrUpdate(LOCAL_WORKING_DIRECTORY, GetDefaultDownloadDirectory());
+        appContext.AddOrUpdateState(LOCAL_WORKING_DIRECTORY, GetDefaultDownloadDirectory());
     }
 
     public async Task<(bool success, string? errorMessage)> Invoke(string[] words, CancellationToken cancellationToken)
@@ -60,7 +60,7 @@ public class ChangeLocalDirectoryCommand : IConsoleCommand
         try
         {
             var dir = Path.GetFullPath(directory);
-            appContext.AddOrUpdate(LOCAL_WORKING_DIRECTORY, dir);
+            appContext.AddOrUpdateState(LOCAL_WORKING_DIRECTORY, dir);
             return (true, "Local directory changed to: '{dir}'");
         }
         catch (Exception ex)

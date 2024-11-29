@@ -1,10 +1,9 @@
 using System.Collections;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
-using Luxelot.Apps.Common.DHT;
 using Microsoft.Extensions.Logging;
 
-namespace Luxelot.DHT;
+namespace Luxelot.Apps.DHT;
 
 public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPublicThumbprint) : IEnumerable<IBucketEntryValue>, ICollection<BucketEntry>
 {
@@ -84,16 +83,21 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
         return result;
     }
 
-    public bool InsertBucketValue(ImmutableArray<byte> nodeKey, ImmutableArray<byte> key, IBucketEntryValue value, ILogger? logger)
+    public bool InsertBucketValue(ImmutableArray<byte> nodeThumbprint, ImmutableArray<byte> key, IBucketEntryValue value, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(value);
 
-        if (nodeKey.IsDefault)
-            throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(nodeKey));
+        if (nodeThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(nodeThumbprint), $"Thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {nodeThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (key.Length != Apps.Common.Constants.THUMBPRINT_LEN) // Needs to be true for distance metric
+            throw new ArgumentOutOfRangeException(nameof(key), $"Key should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {nodeThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+
+        if (nodeThumbprint.IsDefault)
+            throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(nodeThumbprint));
         if (key.IsDefault)
             throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(key));
 
-        var distance = GetDistanceMetric([.. nodeKey], key);
+        var distance = GetDistanceMetric([.. nodeThumbprint], key);
         var kbucket = MapDistanceToBucketNumber(distance);
 
         var bucket = Buckets[kbucket - 1];
@@ -116,14 +120,14 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
         return false;
     }
 
-    public bool TryGetValue(ImmutableArray<byte> nodeKey, ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value)
+    public bool TryGetValue(ImmutableArray<byte> nodeThumbprint, ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value)
     {
-        if (nodeKey.IsDefault)
-            throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(nodeKey));
+        if (nodeThumbprint.IsDefault)
+            throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(nodeThumbprint));
         if (key.IsDefault)
             throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(key));
 
-        var distance = GetDistanceMetric([.. nodeKey], key);
+        var distance = GetDistanceMetric([.. nodeThumbprint], key);
         var kbucket = MapDistanceToBucketNumber(distance);
         if (Buckets[kbucket - 1] == default)
         {

@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -11,9 +10,7 @@ using System.Text;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.Common.DHT;
 using Luxelot.Config;
-using Luxelot.DHT;
 using Luxelot.Messages;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -26,9 +23,11 @@ using static Luxelot.Apps.Common.RegexUtils;
 
 namespace Luxelot;
 
-public class Node
+internal class Node : INode
 {
     public const uint NODE_PROTOCOL_VERSION = 1;
+
+    public event EventHandler<PeerConnectedArgs>? PeerConnected;
 
     private readonly ILogger? Logger;
     public required IPAddress ListenAddress { get; init; } = IPAddress.Any;
@@ -40,12 +39,10 @@ public class Node
     private readonly ConcurrentDictionary<TaskEntry, Task> Tasks = [];
     private readonly ConcurrentDictionary<EndPoint, Peer> Peers = [];
 
-
     // Network state
-    private readonly ConcurrentDictionary<UInt64, bool> ForwardIds = [];
+    private readonly ConcurrentDictionary<ulong, bool> ForwardIds = [];
+    private readonly MemoryCache ThumbprintPublicKeyCache;
     private readonly MemoryCache ThumbprintPeerPaths;
-    private readonly KademliaDistributedHashTable DHT;
-
 
     internal TcpClient? User;
     private readonly Mutex UserMutex = new();
@@ -61,8 +58,16 @@ public class Node
     private readonly List<IClientApp> ClientApps = [];
     private IClientApp? ActiveClientApp = null;
 
+    private Node()
+    {
+        PeerConnected += (sender, args) =>
+        {
+            var thumbprintHex = DisplayUtils.BytesToHex(args.Thumbprint);
+            ThumbprintPublicKeyCache?.Set(thumbprintHex, args.PublicKey);
+        };
+    }
 
-    private Node(ILoggerFactory loggerFactory, AsymmetricCipherKeyPair acp)
+    private Node(ILoggerFactory loggerFactory, AsymmetricCipherKeyPair acp) : this()
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
         ArgumentNullException.ThrowIfNull(acp);
@@ -74,16 +79,14 @@ public class Node
         Name = DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint);
         ShortName = $"{Name[..8]}...";
         Logger = loggerFactory.CreateLogger($"Node {ShortName}");
-
         Logger.LogInformation("Recreated node with identity key thumbprint {Thumbprint}", Name);
 
         ThumbprintPeerPaths = new(new MemoryCacheOptions { }, loggerFactory);
-        Logger.LogInformation("Setup memory caches");
-
-        DHT = new(IdentityKeyPublicThumbprint);
+        ThumbprintPublicKeyCache = new(new MemoryCacheOptions { }, loggerFactory);
+        Logger?.LogInformation("Setup memory caches");
     }
 
-    public Node(IHost host, string? shortName)
+    public Node(IHost host, string? shortName) : this()
     {
         ArgumentNullException.ThrowIfNull(host);
 
@@ -111,9 +114,10 @@ public class Node
         ThumbprintPeerPaths = loggerFactory == null
             ? new(new MemoryCacheOptions { })
             : new(new MemoryCacheOptions { }, loggerFactory);
+        ThumbprintPublicKeyCache = loggerFactory == null
+            ? new(new MemoryCacheOptions { })
+            : new(new MemoryCacheOptions { }, loggerFactory);
         Logger?.LogInformation("Setup memory caches");
-
-        DHT = new(IdentityKeyPublicThumbprint);
     }
 
     internal static Node? CreateFromEncryptedKeyContainer(
@@ -372,7 +376,8 @@ public class Node
 
                 var appConfig = config?.GetSection("Apps").GetSection(serverApp.Name);
 
-                serverApp.OnNodeInitialize(appContext, appConfig);
+                serverApp.OnNodeInitialize(this, appContext, appConfig);
+                _ = appContext.TryRegisterSingleton(() => serverApp); // Every server gets registered as a singleton in the app context
                 ServerApps.Add(serverApp);
                 Logger?.LogInformation("Loaded server app {AppName} ({TypeName})", serverApp.Name, serverAppType.FullName);
             }
@@ -392,6 +397,7 @@ public class Node
                 }
 
                 clientApp.OnInitialize(appContext);
+                _ = appContext.TryRegisterSingleton(() => clientApp); // Every client gets registered as a singleton in the app context
                 ClientApps.Add(clientApp);
                 Logger?.LogInformation("Loaded client app {AppName} ({TypeName})", clientApp.Name, clientAppType.FullName);
             }
@@ -523,20 +529,21 @@ public class Node
                     {
                         var shutdown = !await peer.HandleSyn(context, cancellationToken);
                         if (shutdown)
+                        {
                             Tasks.TryAdd(new TaskEntry { Name = $"Shutdown after Syn from {peerTcpClient.Client?.RemoteEndPoint?.ToString() ?? "new peer"}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
-                        else if (peer.IdentityPublicKeyThumbprint == null
+                            return;
+                        }
+
+                        if (peer.IdentityPublicKeyThumbprint == null
                             || peer.IdentityPublicKey == null)
                         {
                             Logger?.LogError("Identity public key malformed or not initialized after Syn handled.");
                             Tasks.TryAdd(new TaskEntry { Name = $"Shutdown after malfored key on Syn from {peerTcpClient.Client?.RemoteEndPoint?.ToString() ?? "new peer"}", EventType = TaskEventType.FireOnce }, Task.Run(() => ShutdownPeer(peer), cancellationToken));
+                            return;
                         }
-                        else
-                        {
-                            if (peer.IdentityPublicKeyThumbprint != null && peer.RemoteEndPoint != null)
-                                DHT.InsertBucketValue(IdentityKeyPublicThumbprint, peer.IdentityPublicKeyThumbprint.Value, new NodeEntry { RemoteEndpoint = peer.RemoteEndPoint, IdentityPublicKey = peer.IdentityPublicKey }, Logger);
-                            else
-                                throw new InvalidOperationException();
-                        }
+
+                        // Notify apps that a peer has connected, in case they care
+                        RaisePeerConnected(peer);
 
                     }, cancellationToken));
                 }
@@ -671,12 +678,6 @@ public class Node
                 }
                 else
                 {
-                    DHT.InsertBucketValue(IdentityKeyPublicThumbprint, peer.IdentityPublicKeyThumbprint.Value, new NodeEntry
-                    {
-                        RemoteEndpoint = peer.RemoteEndPoint!,
-                        IdentityPublicKey = peer.IdentityPublicKey
-                    }, Logger);
-
                     // Okay, we made it!
                     Logger?.LogDebug("Sending SynAck to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
 
@@ -792,25 +793,6 @@ public class Node
                     }
                     await context.WriteLineToUserAsync("End of Apps List", cancellationToken);
 
-                    break;
-                }
-
-            case "dht":
-                {
-                    await context.WriteLineToUserAsync("\r\nDHT Entry List", cancellationToken);
-
-                    var dhtEntries = ((ICollection<BucketEntry>)DHT).ToArray();
-                    if (dhtEntries.Length > 0)
-                    {
-                        var dht_key_len = dhtEntries.Max(be => DisplayUtils.BytesToHex(be.Key)[..8].Length);
-                        await context.WriteLineToUserAsync($"{"DhtKey".PadRight(dht_key_len)} DhtEntry", cancellationToken);
-
-                        foreach (var bucketEntry in dhtEntries)
-                        {
-                            await context.WriteLineToUserAsync($"{DisplayUtils.BytesToHex(bucketEntry.Key)[..8]} {bucketEntry.Value}", cancellationToken);
-                        }
-                    }
-                    await context.WriteLineToUserAsync("End of DHT Entry List", cancellationToken);
                     break;
                 }
 
@@ -1075,10 +1057,11 @@ public class Node
     internal void AdvisePeerPathToIdentity(Peer peer, ImmutableArray<byte>? thumbprint)
     {
         ArgumentNullException.ThrowIfNull(peer);
-        ArgumentNullException.ThrowIfNull(thumbprint);
+        if (!thumbprint.HasValue)
+            throw new ArgumentNullException(nameof(thumbprint));
 
-        if (thumbprint != null && thumbprint.Value.Length != Apps.Common.Constants.THUMBPRINT_LEN)
-            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Value.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
+        if (thumbprint.Value.Length != Constants.THUMBPRINT_LEN)
+            throw new ArgumentOutOfRangeException(nameof(thumbprint), $"Thumbprint must be {Constants.THUMBPRINT_LEN} bytes long but was {thumbprint.Value.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         // This cache is keyed by string representations of thumbprints.
         // The cache value is the peer short name
@@ -1132,29 +1115,6 @@ public class Node
         }
 
         return (false, false);
-    }
-
-    public bool TryAddDhtEntry(ImmutableArray<byte> key, IBucketEntryValue value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-
-        // Don't add loopback
-        if (key.All(b => b == 0x00))
-            return false;
-
-        return DHT.InsertBucketValue(IdentityKeyPublicThumbprint, key, value, Logger);
-    }
-
-    public bool TryGetDhtEntry(ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value)
-    {
-        // Don't add loopback
-        if (key.All(b => b == 0x00))
-        {
-            value = null;
-            return false;
-        }
-
-        return DHT.TryGetValue(IdentityKeyPublicThumbprint, key, out value);
     }
 
     internal async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken)
@@ -1241,5 +1201,34 @@ public class Node
         }
 
         return false;
+    }
+
+    internal PeerConnectedArgs RaisePeerConnected(Peer peer)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        if (peer.IdentityPublicKey == null)
+            throw new ArgumentException($"{nameof(peer.IdentityPublicKey)} is null on peer", nameof(peer));
+        if (peer.IdentityPublicKeyThumbprint == null)
+            throw new ArgumentException($"{nameof(peer.IdentityPublicKeyThumbprint)} is null on peer", nameof(peer));
+        if (peer.RemoteEndPoint == null)
+            throw new ArgumentException($"{nameof(peer.RemoteEndPoint)} is null on peer", nameof(peer));
+
+        var args = new PeerConnectedArgs(peer.IdentityPublicKey, peer.IdentityPublicKeyThumbprint, peer.RemoteEndPoint);
+        PeerConnected?.Invoke(this, args);
+        return args;
+    }
+
+    internal bool IsKnownInvalidSignature(
+        ImmutableArray<byte> thumbprint,
+        Func<byte[]> message,
+        Func<byte[]> signature)
+    {
+
+        var thumbprintHex = DisplayUtils.BytesToHex(thumbprint);
+        if (!ThumbprintPublicKeyCache.TryGetValue(thumbprintHex, out ImmutableArray<byte> publicKey))
+            return false;
+
+        // This is a Func<> pattern so we don't actually convert messages/signatures unless we have the thumbprint in cache
+        return !CryptoUtils.ValidateDilithiumSignature(publicKey, message.Invoke(), signature.Invoke());
     }
 }

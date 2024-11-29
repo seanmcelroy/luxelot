@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Google.Protobuf;
-using Luxelot.Apps.Common.DHT;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.Common;
@@ -40,8 +39,6 @@ public interface IAppContext
 
     public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class;
 
-    public bool TryAddDhtEntry(ImmutableArray<byte> key, IBucketEntryValue value);
-
     public bool TryGetSingleton<T>([NotNullWhen(true)] out T? value) where T : class;
 
     public Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken);
@@ -52,7 +49,7 @@ public interface IAppContext
 
     public bool TryAddState(string key, [MaybeNullWhen(false)] object value);
 
-    public bool TryRemove(string key, [MaybeNullWhen(false)] out object value);
+    public bool TryRemoveState(string key, [MaybeNullWhen(false)] out object value);
 
-    public void AddOrUpdate(string key, object value);
+    public void AddOrUpdateState(string key, object value);
 }

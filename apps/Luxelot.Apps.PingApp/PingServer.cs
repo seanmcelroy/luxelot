@@ -14,7 +14,7 @@ public class PingServer : IServerApp
 
     public bool InspectsForwarding => false;
 
-    public void OnNodeInitialize(IAppContext appContext, IConfigurationSection? _)
+    public void OnNodeInitialize(INode node, IAppContext appContext, IConfigurationSection? _)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         this.appContext = appContext;

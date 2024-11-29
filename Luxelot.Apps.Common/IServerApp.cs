@@ -9,7 +9,7 @@ public interface IServerApp
 
     public bool InspectsForwarding { get; }
 
-    public void OnNodeInitialize(IAppContext appContext, IConfigurationSection? appConfig);
+    public void OnNodeInitialize(INode node, IAppContext appContext, IConfigurationSection? appConfig);
 
     public bool CanHandle(Any message);
 

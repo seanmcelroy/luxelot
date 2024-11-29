@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option csharp_namespace = "Luxelot.Apps.DHT.Messages";
+
+message DhtFindResponse {
+    fixed64 value1 = 1;
+    fixed64 value2 = 2;
+    fixed64 value3 = 3;
+    fixed64 value4 = 4;
+    repeated Result results = 5;
+}
+
+message Result {
+    bytes id_pub_key = 1;
+    fixed32 addr1 = 2;
+    fixed32 addr2 = 3;
+    fixed32 addr3 = 4;
+    fixed32 addr4 = 5;
+    uint32 port = 6;
+}

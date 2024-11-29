@@ -1,4 +1,4 @@
-namespace Luxelot.DHT;
+namespace Luxelot.Apps.DHT;
 
 public record class Bucket
 {

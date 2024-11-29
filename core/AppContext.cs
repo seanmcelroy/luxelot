@@ -5,11 +5,10 @@ using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics.CodeAnalysis;
-using Luxelot.Apps.Common.DHT;
 
 namespace Luxelot;
 
-public class AppContext : IAppContext
+internal class AppContext : IAppContext
 {
     private readonly ConcurrentDictionary<Type, object> Singletons = [];
     private readonly ConcurrentDictionary<string, object> State = [];
@@ -111,22 +110,13 @@ public class AppContext : IAppContext
 
     public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class
     {
-        if (Singletons.ContainsKey(typeof(T)))
-            return false;
-
         T value = valueFactory.Invoke();
-        return Singletons.TryAdd(typeof(T), value);
-    }
+        var actualType = value.GetType();
 
-    public bool TryAddDhtEntry(ImmutableArray<byte> key, IBucketEntryValue value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-
-        // Don't add loopback
-        if (key.All(b => b == 0x00))
+        if (Singletons.ContainsKey(actualType))
             return false;
 
-        return Node.TryAddDhtEntry(key, value);
+        return Singletons.TryAdd(actualType, value);
     }
 
     public bool TryGetSingleton<T>([NotNullWhen(true)] out T? value) where T : class
@@ -172,7 +162,7 @@ public class AppContext : IAppContext
 
     public bool TryAddState(string key, [MaybeNullWhen(false)] object value) => State.TryAdd(key, value);
 
-    public bool TryRemove(string key, [MaybeNullWhen(false)] out object value) => State.TryRemove(key, out value);
+    public bool TryRemoveState(string key, [MaybeNullWhen(false)] out object value) => State.TryRemove(key, out value);
 
-    public void AddOrUpdate(string key, object value) => _ = State.AddOrUpdate(key, value, (_, _) => value);
+    public void AddOrUpdateState(string key, object value) => _ = State.AddOrUpdate(key, value, (_, _) => value);
 }

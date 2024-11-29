@@ -6,7 +6,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.Common.DHT;
 using Luxelot.Apps.FserveApp.Messages;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
@@ -287,10 +286,7 @@ public class FileClientApp : IClientApp
             throw new InvalidOperationException("Private key not set!");
         SessionSharedKey = appContext.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. acr.CipherText], appContext.Logger);
 
-        //appContext.Logger?.LogCritical("CLIENT FSERV SESSION KEY: {SessionSharedKey}", DisplayUtils.BytesToHex(SessionSharedKey));
         appContext.Logger?.LogInformation("FSERVE AuthChannelResponse received from {SourceThumbprint}. Session shared key established.", requestContext.RequestSourceThumbprintHex);
-
-        appContext.TryAddDhtEntry(ServerThumbprint.Value, new NodeEntry { IdentityPublicKey = [.. acr.IdPubKey.ToByteArray()], RemoteEndpoint = null });
 
         var frame = FrameUtils.WrapClientFrame(
             appContext,

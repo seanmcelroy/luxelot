@@ -7,8 +7,6 @@ using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
-using Luxelot.Apps.Common.DHT;
-using System.Runtime.Intrinsics.Arm;
 
 namespace Luxelot;
 
@@ -179,7 +177,13 @@ internal class Peer : IDisposable
         }
 
         // We could decrypt and parse, so consider us established.
-        State = PeerState.ESTABLISHED;
+        if (State != PeerState.ESTABLISHED && IdentityPublicKey != null)
+        {
+            State = PeerState.ESTABLISHED;
+
+            // Notify apps that a peer has connected, in case they care
+            nodeContext.RaisePeerConnected(this);
+        }
 
         if (envelopePayload.ErrorMessage != null)
         {
@@ -234,8 +238,8 @@ internal class Peer : IDisposable
                 if (IdentityPublicKeyThumbprint != null &&
                     !Enumerable.SequenceEqual(fwd.SrcIdentityThumbprint, IdentityPublicKeyThumbprint.Value))
                 {
-                    // This is from a node which is not this peer, so remember this later on for routing.
-                    nodeContext.AdvisePeerPathToIdentity(this, [.. fwd.SrcIdentityThumbprint.ToByteArray()]);
+                    // TODO: This is from a node which is not this peer, so remember this later on for routing.
+                    //nodeContext.AdvisePeerPathToIdentity(this, [.. fwd.SrcIdentityThumbprint.ToByteArray()]);
                 }
 
                 await nodeContext.RelayForwardMessage(fwd, IdentityPublicKeyThumbprint, cancellationToken);
@@ -268,18 +272,10 @@ internal class Peer : IDisposable
                     // If we are aware of the public key of the origin, then validate the forwarded message.
                     ImmutableArray<byte> fwd_origin_pub_thumbprint = [.. fwd.SrcIdentityThumbprint];
 
-                    if (nodeContext.TryGetDhtEntry([.. fwd_origin_pub_thumbprint], out IBucketEntryValue? fwd_origin_node)
-                        && fwd_origin_node is NodeEntry fwd_node
-                        && fwd_node.IdentityPublicKey != null)
+                    if (nodeContext.IsKnownInvalidSignature(fwd_origin_pub_thumbprint, fwd.Payload.ToByteArray, fwd.Signature.ToByteArray))
                     {
-
-                        var fwd_payload = fwd.Payload.ToByteArray();
-                        var isSignatureValid = CryptoUtils.ValidateDilithiumSignature(fwd_node.IdentityPublicKey.Value, fwd_payload, fwd.Signature.ToByteArray());
-                        if (!isSignatureValid)
-                        {
-                            nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
-                            return true;
-                        }
+                        nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
+                        return true;
                     }
 
                     try
@@ -325,21 +321,13 @@ internal class Peer : IDisposable
         //MessageUtils.Dump(dm, nodeContext.Logger);
 
         ImmutableArray<byte> srcThumbprintBytes = [.. dm.SrcIdentityThumbprint.ToByteArray()];
-        var isSenderVerifiable =
-            (
-                    nodeContext.TryGetDhtEntry(srcThumbprintBytes, out IBucketEntryValue? sourceNode)
-                    && (sourceNode is NodeEntry srcNode)
-                    && srcNode.IdentityPublicKey != null
-            )
-            || IsLoopback;
-        var dm_payload = dm.Payload.ToByteArray();
-        var isSignatureValid = IsLoopback || (isSenderVerifiable && CryptoUtils.ValidateDilithiumSignature(((NodeEntry)sourceNode!).IdentityPublicKey!.Value, dm_payload, dm.Signature.ToByteArray()));
+        var isSignatureValid = IsLoopback || !nodeContext.IsKnownInvalidSignature(srcThumbprintBytes, dm.Payload.ToByteArray, dm.Signature.ToByteArray);
 
         // Is this destined for me?
         if (!IsLoopback && !Enumerable.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint, dm.DstIdentityThumbprint))
         {
             // It is NOT destined for me.  But can I be useful and verify the signature so I do not forward corruption?
-            if (isSenderVerifiable && !isSignatureValid)
+            if (!isSignatureValid)
             {
                 nodeContext.Logger?.LogWarning("Discarding corrupt message intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(dm.DstIdentityThumbprint));
                 return true;
@@ -364,14 +352,7 @@ internal class Peer : IDisposable
             return true;
         }
 
-        // Is the signature verifiable?
-        if (!isSenderVerifiable)
-        {
-            nodeContext.Logger?.LogTrace("Message signed with unknown signature purportedly from {SourceThumbprint} intended for me.  Allowing.", DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint));
-            //return false;
-        }
-
-        if (isSenderVerifiable && !isSignatureValid)
+        if (!isSignatureValid)
         {
             nodeContext.Logger?.LogError("Discarding message with invalid signature from {SourceThumbprint} intended for me.", DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint));
             return false;
@@ -548,7 +529,14 @@ internal class Peer : IDisposable
         IdentityPublicKeyThumbprint = SHA256.HashData(id_pub_key_bytes).ToImmutableArray();
         Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
         ShortName = $"{Name[..8]}";
-        State = PeerState.ESTABLISHED;
+
+        if (State != PeerState.ESTABLISHED)
+        {
+            State = PeerState.ESTABLISHED;
+
+            // Notify apps that a peer has connected, in case they care
+            nodeContext.RaisePeerConnected(this);
+        }
 
         // Remember what this peer perceives my IP address as
         ClientPerceivedLocalAddress = NetUtils.ConvertMessageIntegersToIPAddress(ack.Addr1, ack.Addr2, ack.Addr3, ack.Addr4);
@@ -560,7 +548,14 @@ internal class Peer : IDisposable
     internal void HandleSynAck(NodeContext nodeContext, SynAck synAck, CancellationToken cancellationToken)
     {
         using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleSynAck)} from {RemoteEndPoint}");
-        State = PeerState.ESTABLISHED;
+
+        if (State != PeerState.ESTABLISHED && IdentityPublicKey != null)
+        {
+            State = PeerState.ESTABLISHED;
+
+            // Notify apps that a peer has connected, in case they care
+            nodeContext.RaisePeerConnected(this);
+        }
 
         // Remember what this peer perceives my IP address as
         ClientPerceivedLocalAddress = NetUtils.ConvertMessageIntegersToIPAddress(synAck.Addr1, synAck.Addr2, synAck.Addr3, synAck.Addr4);

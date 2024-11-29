@@ -8,7 +8,7 @@ If you haven't already, come find us in Matrix ([Luxelot](https://matrix.to/#/#l
 
 ## Submitting changes
 
-Please send a [GitHub Pull Request to luxelot](https://github.com/seanmcelroy/luxelot/pull/new/master) with a clear list of what you've done (read more about [pull requests](http://help.github.com/pull-requests/)).
+Please send a [GitHub Pull Request to Luxelot](https://github.com/seanmcelroy/luxelot/pull/new/master) with a clear list of what you've done (read more about [pull requests](http://help.github.com/pull-requests/)).
 
 Always write a clear log message for your commits. One-line messages are fine for small changes, but bigger changes should look like this:
 

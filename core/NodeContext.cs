@@ -1,15 +1,13 @@
 using System.Collections.Immutable;
-using System.Diagnostics.CodeAnalysis;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.Common.DHT;
 using Luxelot.Messages;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot;
 
-public readonly struct NodeContext(Node node)
+internal readonly struct NodeContext(Node node)
 {
     public required readonly string NodeShortName { get; init; }
     public required readonly ImmutableArray<byte> NodeIdentityKeyPublicBytes { get; init; }
@@ -29,12 +27,7 @@ public readonly struct NodeContext(Node node)
         return _node.PrepareEnvelopePayload(routingPeerThumbprint, ultimateDestinationThumbprint, innerPayload);
     }
 
-    public bool RegisterForwardId(UInt64 forwardId) => _node.RegisterForwardId(forwardId);
-
-    internal void AdvisePeerPathToIdentity(Peer peer, ImmutableArray<byte> thumbprint) {
-        ArgumentNullException.ThrowIfNull(peer);
-        _node.AdvisePeerPathToIdentity(peer, thumbprint);
-    }
+    public bool RegisterForwardId(ulong forwardId) => _node.RegisterForwardId(forwardId);
 
     public async Task RelayForwardMessage(ForwardedMessage original, ImmutableArray<byte>? excludedNeighborThumbprint, CancellationToken cancellationToken)
     {
@@ -46,11 +39,17 @@ public readonly struct NodeContext(Node node)
         await _node.RelayForwardMessage(original, excludedNeighborThumbprint, Logger, cancellationToken);
     }
 
-    public async Task<(bool handled, bool success)> TryHandleMessage(IRequestContext requestContext, Any message, CancellationToken cancellationToken) => 
+    public async Task<(bool handled, bool success)> TryHandleMessage(IRequestContext requestContext, Any message, CancellationToken cancellationToken) =>
         await _node.TryHandleMessage(requestContext, message, cancellationToken);
 
-    public async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken) =>
+    internal async Task WriteLineToUserAsync(string message, CancellationToken cancellationToken) =>
         await _node.WriteLineToUserAsync(message, cancellationToken);
 
-    public bool TryGetDhtEntry(ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value) => _node.TryGetDhtEntry(key, out value);
+    internal void RaisePeerConnected(Peer peer) => _node.RaisePeerConnected(peer);
+
+    internal bool IsKnownInvalidSignature(
+        ImmutableArray<byte> thumbprint,
+        Func<byte[]> message,
+        Func<byte[]> signature) => _node.IsKnownInvalidSignature(thumbprint, message, signature);
+
 }

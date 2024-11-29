@@ -7,6 +7,9 @@ This directory contains loadable modules the core app can activate at runtime to
 ### Fserve 
 Fserve is a file serving application protocol that operates over Luxelot.  It provides FTP-like capabilities in a client app that a user of a node can use via the console command line to establish a session with a remote node that also uses this app to provide the Fserve service.  Files can be enumerated, downloaded in chunks, and reassembled, all using end-to-end encryption.
 
+### DHT
+DHT is a loadable service that provides Kademila distributed hash tables and brings support for commands for nodes to query, store, and retrieve values from DHTs.
+
 ### Ping
 Ping is a fundamental interactive liveliness check, which is implemented as a simple loadable app.  This is one is so simple, it serves as an instructive template for creating a new loadable module.
 

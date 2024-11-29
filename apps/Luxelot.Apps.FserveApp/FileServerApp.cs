@@ -48,7 +48,7 @@ public class FserveApp : IServerApp
         ArgumentNullException.ThrowIfNull(requestContext);
         ArgumentNullException.ThrowIfNull(message);
 
-        using var scope = appContext?.Logger?.BeginScope("HandleMessage");
+        using var scope = appContext?.Logger?.BeginScope(nameof(HandleMessage));
 
         if (appContext == null)
             throw new InvalidOperationException("App is not initialized");
@@ -135,18 +135,11 @@ public class FserveApp : IServerApp
         }
     }
 
-    public void OnNodeInitialize(IAppContext appContext, IConfigurationSection? appConfig)
+    public void OnNodeInitialize(INode node, IAppContext appContext, IConfigurationSection? appConfig)
     {
         ArgumentNullException.ThrowIfNull(appContext);
         this.appContext = appContext;
         this.appConfig = appConfig;
-
-        _ = appContext.TryRegisterSingleton<FileClientApp>(() =>
-        {
-            var c = new FileClientApp();
-            c.OnInitialize(appContext);
-            return c;
-        });
 
         // Clear old tickets
         var tempDir = Path.GetTempPath();
@@ -184,8 +177,6 @@ public class FserveApp : IServerApp
         }
 
         var (encapsulatedKey, sessionSharedKey) = appContext.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey([.. acb.SessionPubKey.ToByteArray()], appContext.Logger);
-
-        //appContext.Logger?.LogCritical("SERVER FSERV SESSION KEY: {SessionSharedKey}", DisplayUtils.BytesToHex(sessionSharedKey));
 
         var cc = new ClientConnection(sessionSharedKey);
         if (!ClientConnections.TryAdd(cacheKey, cc))
