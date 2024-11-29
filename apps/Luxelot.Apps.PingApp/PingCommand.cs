@@ -10,8 +10,6 @@ public class PingCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string FullCommand => "ping";
-
     public string InteractiveCommand => "ping";
 
     public string[] InteractiveAliases => [];

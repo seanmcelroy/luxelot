@@ -8,8 +8,6 @@ public class ChangeLocalDirectoryCommand : IConsoleCommand
     internal const string LOCAL_WORKING_DIRECTORY = "LOCAL_DIR";
     private IAppContext? appContext;
 
-    public string FullCommand => "fslcd";
-
     public string InteractiveCommand => "lcd";
 
     public string[] InteractiveAliases => ["lchdir"];

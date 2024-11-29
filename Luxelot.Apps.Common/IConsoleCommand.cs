@@ -2,8 +2,6 @@ namespace Luxelot.Apps.Common;
 
 public interface IConsoleCommand
 {
-    public string FullCommand { get; }
-
     public string InteractiveCommand { get; }
 
     public string[] InteractiveAliases { get; }

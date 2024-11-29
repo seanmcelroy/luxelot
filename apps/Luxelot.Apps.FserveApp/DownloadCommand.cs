@@ -7,8 +7,6 @@ public class DownloadCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string FullCommand => "fsdownload";
-
     public string InteractiveCommand => "download";
 
     public string[] InteractiveAliases => ["dl"];

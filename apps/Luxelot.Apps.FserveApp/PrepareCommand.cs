@@ -7,8 +7,6 @@ public class PrepareCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string FullCommand => "fsprepare";
-
     public string InteractiveCommand => "prepare";
 
     public string[] InteractiveAliases => ["prep"];

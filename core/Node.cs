@@ -714,6 +714,7 @@ internal class Node : INode
             return;
 
         var words = QuotedWordArrayRegex().Split(input).Where(s => s.Length > 0).ToArray();
+        var two_word_command = words.Length == 1 ? null : $"{words[0]} {words[1]}";
         var command = words.First();
 
         if (ActiveClientApp != null)
@@ -732,14 +733,14 @@ internal class Node : INode
                     if (string.IsNullOrWhiteSpace(result.ErrorMessage))
                     {
                         if (result.Command != null)
-                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? result.Command.FullCommand : result.Command.InteractiveCommand)}", cancellationToken);
+                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? string.Empty : ActiveClientApp.InteractiveCommand + " ")}{result.Command.InteractiveCommand}", cancellationToken);
                         else
                             await context.WriteLineToUserAsync($"ERROR", cancellationToken);
                     }
                     else
                     {
                         if (result.Command != null)
-                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? result.Command.FullCommand : result.Command.InteractiveCommand)}: {result.ErrorMessage}", cancellationToken);
+                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? string.Empty : ActiveClientApp.InteractiveCommand + " ")}{result.Command.InteractiveCommand}: {result.ErrorMessage}", cancellationToken);
                         else
                             await context.WriteLineToUserAsync($"ERROR: {result.ErrorMessage}", cancellationToken);
                     }
@@ -770,10 +771,10 @@ internal class Node : INode
                         else
                             sb.AppendLine($"{ca.Name}");
 
-                        var full_len = ca.Commands.Max(com => com.FullCommand.Length);
+                        var full_len = ca.Commands.Max(com => com.InteractiveCommand.Length);
 
-                        foreach (var com in ca.Commands.OrderBy(x => x.FullCommand))
-                            sb.AppendLine($"     {com.FullCommand.PadRight(full_len)}: {com.ShortHelp}");
+                        foreach (var com in ca.Commands.OrderBy(x => x.InteractiveCommand))
+                            sb.AppendLine($"     {com.InteractiveCommand.PadRight(full_len)}: {com.ShortHelp}");
                     }
                     sb.AppendLine().AppendLine("END OF COMMAND LIST").AppendLine();
                     await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
@@ -872,17 +873,19 @@ internal class Node : INode
                 User?.Close();
                 User = null;
                 Logger?.LogInformation("Console user quit.");
-                break;
+                return;
 
             case "shutdown":
                 Environment.Exit(0);
-                break;
+                return;
 
             default:
                 foreach (var ca in ClientApps)
                 {
                     // Maybe it's a client app that has an interactive mode?
-                    if (ca.InteractiveCommand != null && string.Compare(ca.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0)
+                    if (two_word_command == null
+                        && ca.InteractiveCommand != null
+                        && string.Compare(ca.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0)
                     {
                         ActiveClientApp = ca;
                         await ca.OnActivate(cancellationToken);
@@ -890,12 +893,27 @@ internal class Node : INode
                     }
 
                     // Or maybe it's a command this client app loaded?
-                    var appCommand = ca.Commands.FirstOrDefault(cc => string.Compare(cc.FullCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
-                    if (appCommand != null)
+                    var two_word_matches = ca.Commands
+                        .Where(cc => string.Compare($"{ca.InteractiveCommand} {cc.InteractiveCommand}", two_word_command, StringComparison.InvariantCultureIgnoreCase) == 0)
+                        .ToArray();
+
+                    string[] words_parameters = two_word_matches.Length == 0
+                        ? words
+                        : words.Skip(1).ToArray();
+
+                    var appCommandMatches = two_word_matches.Length == 0
+                        ? ca.Commands.Where(cc =>
+                            string.Compare($"{ca.InteractiveCommand}{cc.InteractiveCommand}", command, StringComparison.InvariantCultureIgnoreCase) == 0
+                            || string.Compare(cc.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0
+                        ).ToArray()
+                        : two_word_matches;
+
+                    if (appCommandMatches.Length == 1)
                     {
-                        var (success, errorMessage) = await appCommand.Invoke(words, cancellationToken);
+                        var appCommand = appCommandMatches[0];
+                        var (success, errorMessage) = await appCommand.Invoke(words_parameters, cancellationToken);
                         if (!success)
-                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? appCommand.FullCommand : appCommand.InteractiveCommand)} {errorMessage}".TrimEnd(), cancellationToken);
+                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? string.Empty : ActiveClientApp.InteractiveCommand + " ")}{appCommand.InteractiveCommand}: {errorMessage}", cancellationToken);
                         return;
                     }
                 }

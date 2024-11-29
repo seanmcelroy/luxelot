@@ -5,14 +5,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.DhtApp;
 
-/// <summary>
-/// This is a local command to inspect entries from the local node's DHT
-/// </summary>
-public class EntriesCommand : IConsoleCommand
+public class FindCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string InteractiveCommand => "entries";
+    public string InteractiveCommand => "find";
 
     public string[] InteractiveAliases => [];
 

@@ -7,8 +7,6 @@ public class ListCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string FullCommand => "fslist";
-
     public string InteractiveCommand => "list";
 
     public string[] InteractiveAliases => ["ls", "dir"];

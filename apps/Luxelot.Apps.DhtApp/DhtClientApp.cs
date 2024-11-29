@@ -46,7 +46,7 @@ public class DhtClientApp : IClientApp
 
             Commands.Add(consoleCommand);
             consoleCommand.OnInitialize(appContext);
-            appContext.Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.FullCommand, consoleCommandType.FullName);
+            appContext.Logger?.LogInformation("Loaded console command '{CommandName}' ({TypeName})", consoleCommand.InteractiveCommand, consoleCommandType.FullName);
         }
     }
 
@@ -57,15 +57,6 @@ public class DhtClientApp : IClientApp
 
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         await appContext.SendConsoleMessage($"{Name} {version}", cancellationToken);
-    }
-
-    public async Task<(bool handled, bool success, string? errrorMessage)> TryInvokeCommand(string command, string[] words, CancellationToken cancellationToken)
-    {
-        var appCommand = Commands.FirstOrDefault(cc => string.Compare(cc.FullCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0);
-        if (appCommand == null)
-            return (false, false, null);
-        var (success, errorMessage) = await appCommand.Invoke(words, cancellationToken);
-        return (true, success, errorMessage);
     }
 
     public async Task<HandleUserInputResult> HandleUserInput(string input, CancellationToken cancellationToken)

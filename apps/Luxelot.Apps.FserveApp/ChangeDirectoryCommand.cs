@@ -7,8 +7,6 @@ public class ChangeDirectoryCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string FullCommand => "fscd";
-
     public string InteractiveCommand => "cd";
 
     public string[] InteractiveAliases => ["chdir"];

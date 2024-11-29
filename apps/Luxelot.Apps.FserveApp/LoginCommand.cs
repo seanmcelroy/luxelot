@@ -8,8 +8,6 @@ public class LoginCommand : IConsoleCommand
 {
     private IAppContext? appContext;
 
-    public string FullCommand => "fslogin";
-
     public string InteractiveCommand => "login";
 
     public string[] InteractiveAliases => [];
