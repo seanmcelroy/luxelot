@@ -9,7 +9,7 @@ using pb = global::Google.Protobuf;
 using pbc = global::Google.Protobuf.Collections;
 using pbr = global::Google.Protobuf.Reflection;
 using scg = global::System.Collections.Generic;
-namespace Luxelot.Apps.DHT.Messages {
+namespace Luxelot.Apps.DhtApp.Messages {
 
   /// <summary>Holder for reflection information generated from dht_find_request.proto</summary>
   public static partial class DhtFindRequestReflection {
@@ -28,11 +28,11 @@ namespace Luxelot.Apps.DHT.Messages {
             "BnZhbHVlMRgBIAEoBhIOCgZ2YWx1ZTIYAiABKAYSDgoGdmFsdWUzGAMgASgG",
             "Eg4KBnZhbHVlNBgEIAEoBhIhCgp0YWJsZV90eXBlGAUgASgOMg0uRGh0VGFi",
             "bGVUeXBlKiQKDERodFRhYmxlVHlwZRIICgROb2RlEAASCgoGQmluYXJ5EAFC",
-            "HKoCGUx1eGVsb3QuQXBwcy5ESFQuTWVzc2FnZXNiBnByb3RvMw=="));
+            "H6oCHEx1eGVsb3QuQXBwcy5EaHRBcHAuTWVzc2FnZXNiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
-          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.DHT.Messages.DhtTableType), }, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.DHT.Messages.DhtFindRequest), global::Luxelot.Apps.DHT.Messages.DhtFindRequest.Parser, new[]{ "Value1", "Value2", "Value3", "Value4", "TableType" }, null, null, null, null)
+          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Luxelot.Apps.DhtApp.Messages.DhtTableType), }, null, new pbr::GeneratedClrTypeInfo[] {
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.DhtApp.Messages.DhtFindRequest), global::Luxelot.Apps.DhtApp.Messages.DhtFindRequest.Parser, new[]{ "Value1", "Value2", "Value3", "Value4", "TableType" }, null, null, null, null)
           }));
     }
     #endregion
@@ -61,7 +61,7 @@ namespace Luxelot.Apps.DHT.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Luxelot.Apps.DHT.Messages.DhtFindRequestReflection.Descriptor.MessageTypes[0]; }
+      get { return global::Luxelot.Apps.DhtApp.Messages.DhtFindRequestReflection.Descriptor.MessageTypes[0]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -145,10 +145,10 @@ namespace Luxelot.Apps.DHT.Messages {
 
     /// <summary>Field number for the "table_type" field.</summary>
     public const int TableTypeFieldNumber = 5;
-    private global::Luxelot.Apps.DHT.Messages.DhtTableType tableType_ = global::Luxelot.Apps.DHT.Messages.DhtTableType.Node;
+    private global::Luxelot.Apps.DhtApp.Messages.DhtTableType tableType_ = global::Luxelot.Apps.DhtApp.Messages.DhtTableType.Node;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public global::Luxelot.Apps.DHT.Messages.DhtTableType TableType {
+    public global::Luxelot.Apps.DhtApp.Messages.DhtTableType TableType {
       get { return tableType_; }
       set {
         tableType_ = value;
@@ -186,7 +186,7 @@ namespace Luxelot.Apps.DHT.Messages {
       if (Value2 != 0UL) hash ^= Value2.GetHashCode();
       if (Value3 != 0UL) hash ^= Value3.GetHashCode();
       if (Value4 != 0UL) hash ^= Value4.GetHashCode();
-      if (TableType != global::Luxelot.Apps.DHT.Messages.DhtTableType.Node) hash ^= TableType.GetHashCode();
+      if (TableType != global::Luxelot.Apps.DhtApp.Messages.DhtTableType.Node) hash ^= TableType.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -221,7 +221,7 @@ namespace Luxelot.Apps.DHT.Messages {
         output.WriteRawTag(33);
         output.WriteFixed64(Value4);
       }
-      if (TableType != global::Luxelot.Apps.DHT.Messages.DhtTableType.Node) {
+      if (TableType != global::Luxelot.Apps.DhtApp.Messages.DhtTableType.Node) {
         output.WriteRawTag(40);
         output.WriteEnum((int) TableType);
       }
@@ -251,7 +251,7 @@ namespace Luxelot.Apps.DHT.Messages {
         output.WriteRawTag(33);
         output.WriteFixed64(Value4);
       }
-      if (TableType != global::Luxelot.Apps.DHT.Messages.DhtTableType.Node) {
+      if (TableType != global::Luxelot.Apps.DhtApp.Messages.DhtTableType.Node) {
         output.WriteRawTag(40);
         output.WriteEnum((int) TableType);
       }
@@ -277,7 +277,7 @@ namespace Luxelot.Apps.DHT.Messages {
       if (Value4 != 0UL) {
         size += 1 + 8;
       }
-      if (TableType != global::Luxelot.Apps.DHT.Messages.DhtTableType.Node) {
+      if (TableType != global::Luxelot.Apps.DhtApp.Messages.DhtTableType.Node) {
         size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) TableType);
       }
       if (_unknownFields != null) {
@@ -304,7 +304,7 @@ namespace Luxelot.Apps.DHT.Messages {
       if (other.Value4 != 0UL) {
         Value4 = other.Value4;
       }
-      if (other.TableType != global::Luxelot.Apps.DHT.Messages.DhtTableType.Node) {
+      if (other.TableType != global::Luxelot.Apps.DhtApp.Messages.DhtTableType.Node) {
         TableType = other.TableType;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
@@ -339,7 +339,7 @@ namespace Luxelot.Apps.DHT.Messages {
             break;
           }
           case 40: {
-            TableType = (global::Luxelot.Apps.DHT.Messages.DhtTableType) input.ReadEnum();
+            TableType = (global::Luxelot.Apps.DhtApp.Messages.DhtTableType) input.ReadEnum();
             break;
           }
         }
@@ -374,7 +374,7 @@ namespace Luxelot.Apps.DHT.Messages {
             break;
           }
           case 40: {
-            TableType = (global::Luxelot.Apps.DHT.Messages.DhtTableType) input.ReadEnum();
+            TableType = (global::Luxelot.Apps.DhtApp.Messages.DhtTableType) input.ReadEnum();
             break;
           }
         }

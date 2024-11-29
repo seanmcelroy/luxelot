@@ -2,11 +2,11 @@ using System.Data;
 using System.Reflection;
 using System.Text;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.DHT.Messages;
+using Luxelot.Apps.DhtApp.Messages;
 using Microsoft.Extensions.Logging;
 using static Luxelot.Apps.Common.RegexUtils;
 
-namespace Luxelot.Apps.DHT;
+namespace Luxelot.Apps.DhtApp;
 
 /// <summary>
 /// This is a user interactive DHT client app which does not provide for multiple sessions or downloads.

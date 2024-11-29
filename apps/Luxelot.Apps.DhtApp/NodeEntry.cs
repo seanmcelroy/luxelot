@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Net;
 using Luxelot.Apps.Common;
 
-namespace Luxelot.Apps.DHT;
+namespace Luxelot.Apps.DhtApp;
 
 public record class NodeEntry : IBucketEntryValue
 {

@@ -1,10 +1,10 @@
 using Google.Protobuf.WellKnownTypes;
 using Luxelot.Apps.Common;
-using Luxelot.Apps.DHT.Messages;
+using Luxelot.Apps.DhtApp.Messages;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace Luxelot.Apps.DHT;
+namespace Luxelot.Apps.DhtApp;
 
 public class DhtServerApp : IServerApp
 {

@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 
-namespace Luxelot.Apps.DHT;
+namespace Luxelot.Apps.DhtApp;
 
 public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPublicThumbprint) : IEnumerable<IBucketEntryValue>, ICollection<BucketEntry>
 {

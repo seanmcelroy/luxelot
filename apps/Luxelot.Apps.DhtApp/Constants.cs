@@ -1,4 +1,4 @@
-namespace Luxelot.Apps.DHT;
+namespace Luxelot.Apps.DhtApp;
 
 public static class Constants {
     public const int K = 3;

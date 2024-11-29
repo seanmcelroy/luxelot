@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Luxelot.Apps.DHT;
+namespace Luxelot.Apps.DhtApp;
 
 public readonly record struct BucketEntry
 {

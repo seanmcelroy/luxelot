@@ -9,7 +9,7 @@ using pb = global::Google.Protobuf;
 using pbc = global::Google.Protobuf.Collections;
 using pbr = global::Google.Protobuf.Reflection;
 using scg = global::System.Collections.Generic;
-namespace Luxelot.Apps.DHT.Messages {
+namespace Luxelot.Apps.DhtApp.Messages {
 
   /// <summary>Holder for reflection information generated from dht_find_response.proto</summary>
   public static partial class DhtFindResponseReflection {
@@ -29,13 +29,13 @@ namespace Luxelot.Apps.DHT.Messages {
             "KAYSDgoGdmFsdWU0GAQgASgGEhgKB3Jlc3VsdHMYBSADKAsyBy5SZXN1bHQi",
             "ZgoGUmVzdWx0EhIKCmlkX3B1Yl9rZXkYASABKAwSDQoFYWRkcjEYAiABKAcS",
             "DQoFYWRkcjIYAyABKAcSDQoFYWRkcjMYBCABKAcSDQoFYWRkcjQYBSABKAcS",
-            "DAoEcG9ydBgGIAEoDUIcqgIZTHV4ZWxvdC5BcHBzLkRIVC5NZXNzYWdlc2IG",
-            "cHJvdG8z"));
+            "DAoEcG9ydBgGIAEoDUIfqgIcTHV4ZWxvdC5BcHBzLkRIVEFwcC5NZXNzYWdl",
+            "c2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.DHT.Messages.DhtFindResponse), global::Luxelot.Apps.DHT.Messages.DhtFindResponse.Parser, new[]{ "Value1", "Value2", "Value3", "Value4", "Results" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.DHT.Messages.Result), global::Luxelot.Apps.DHT.Messages.Result.Parser, new[]{ "IdPubKey", "Addr1", "Addr2", "Addr3", "Addr4", "Port" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.DhtApp.Messages.DhtFindResponse), global::Luxelot.Apps.DhtApp.Messages.DhtFindResponse.Parser, new[]{ "Value1", "Value2", "Value3", "Value4", "Results" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Luxelot.Apps.DhtApp.Messages.Result), global::Luxelot.Apps.DhtApp.Messages.Result.Parser, new[]{ "IdPubKey", "Addr1", "Addr2", "Addr3", "Addr4", "Port" }, null, null, null, null)
           }));
     }
     #endregion
@@ -56,7 +56,7 @@ namespace Luxelot.Apps.DHT.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Luxelot.Apps.DHT.Messages.DhtFindResponseReflection.Descriptor.MessageTypes[0]; }
+      get { return global::Luxelot.Apps.DhtApp.Messages.DhtFindResponseReflection.Descriptor.MessageTypes[0]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -140,12 +140,12 @@ namespace Luxelot.Apps.DHT.Messages {
 
     /// <summary>Field number for the "results" field.</summary>
     public const int ResultsFieldNumber = 5;
-    private static readonly pb::FieldCodec<global::Luxelot.Apps.DHT.Messages.Result> _repeated_results_codec
-        = pb::FieldCodec.ForMessage(42, global::Luxelot.Apps.DHT.Messages.Result.Parser);
-    private readonly pbc::RepeatedField<global::Luxelot.Apps.DHT.Messages.Result> results_ = new pbc::RepeatedField<global::Luxelot.Apps.DHT.Messages.Result>();
+    private static readonly pb::FieldCodec<global::Luxelot.Apps.DhtApp.Messages.Result> _repeated_results_codec
+        = pb::FieldCodec.ForMessage(42, global::Luxelot.Apps.DhtApp.Messages.Result.Parser);
+    private readonly pbc::RepeatedField<global::Luxelot.Apps.DhtApp.Messages.Result> results_ = new pbc::RepeatedField<global::Luxelot.Apps.DhtApp.Messages.Result>();
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public pbc::RepeatedField<global::Luxelot.Apps.DHT.Messages.Result> Results {
+    public pbc::RepeatedField<global::Luxelot.Apps.DhtApp.Messages.Result> Results {
       get { return results_; }
     }
 
@@ -382,7 +382,7 @@ namespace Luxelot.Apps.DHT.Messages {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Luxelot.Apps.DHT.Messages.DhtFindResponseReflection.Descriptor.MessageTypes[1]; }
+      get { return global::Luxelot.Apps.DhtApp.Messages.DhtFindResponseReflection.Descriptor.MessageTypes[1]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
