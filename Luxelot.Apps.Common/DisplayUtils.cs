@@ -1,13 +1,10 @@
-using System.Net.NetworkInformation;
-using System.Reflection.Metadata;
 using System.Text;
 
 namespace Luxelot.Apps.Common;
 
 public static class DisplayUtils
 {
-    public static string BytesToHex(IEnumerable<byte>? bytes) =>
-    bytes == null ? string.Empty : Convert.ToHexString(bytes.ToArray());
+    public static string BytesToHex(ReadOnlySpan<byte> bytes) => Convert.ToHexString(bytes);
 
     public static byte[] HexToBytes(string hex)
     {

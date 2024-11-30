@@ -53,15 +53,15 @@ public class EntriesCommand : IConsoleCommand
         var sb = new StringBuilder();
         sb.AppendLine("\r\nDHT Entry List");
 
-        var dhtEntries = ((ICollection<BucketEntry>)dht).ToArray();
-        if (dhtEntries.Length > 0)
+        var dhtEntries = (ICollection<BucketEntry>)dht;
+        if (dhtEntries.Count > 0)
         {
-            var dht_key_len = dhtEntries.Max(be => DisplayUtils.BytesToHex(be.Key)[..8].Length);
+            var dht_key_len = dhtEntries.Max(be => Convert.ToHexString(be.Key.AsSpan())[..8].Length);
             sb.AppendLine($"{"DhtKey".PadRight(dht_key_len)} DhtEntry");
 
             foreach (var bucketEntry in dhtEntries)
             {
-                sb.AppendLine($"{DisplayUtils.BytesToHex(bucketEntry.Key)[..8]} {bucketEntry.Value}");
+                sb.AppendLine($"{Convert.ToHexString(bucketEntry.Key.AsSpan())[..8]} {bucketEntry.Value}");
             }
         }
         sb.AppendLine("End of DHT Entry List");

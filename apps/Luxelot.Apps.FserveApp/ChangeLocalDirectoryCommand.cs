@@ -53,13 +53,13 @@ public class ChangeLocalDirectoryCommand : IConsoleCommand
         }
 
         if (!Directory.Exists(directory))
-            return (false, "No such directory '{directory}'");
+            return (false, $"No such directory '{directory}'");
 
         try
         {
             var dir = Path.GetFullPath(directory);
             appContext.AddOrUpdateState(LOCAL_WORKING_DIRECTORY, dir);
-            return (true, "Local directory changed to: '{dir}'");
+            return (true, $"Local directory changed to: '{dir}'");
         }
         catch (Exception ex)
         {

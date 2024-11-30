@@ -14,16 +14,16 @@ internal static class MessageUtils
          "\r\nCipherTextSHA256={CipherTextSHA256}" +
          "\r\nAD={AssociatedData}" +
          "\r\nTag={Tag}",
-         DisplayUtils.BytesToHex(envelope.Nonce.ToByteArray()),
-         DisplayUtils.BytesToHex(SHA256.HashData(envelope.Ciphertext.ToByteArray())),
-         DisplayUtils.BytesToHex(envelope.AssociatedData.ToByteArray()),
-         DisplayUtils.BytesToHex(envelope.Tag.ToByteArray()));
+         Convert.ToHexString(envelope.Nonce.Span),
+         Convert.ToHexString(SHA256.HashData(envelope.Ciphertext.Span)),
+         Convert.ToHexString(envelope.AssociatedData.Span),
+         Convert.ToHexString(envelope.Tag.Span));
 
         Console.WriteLine(
-            $"\r\nENVELOPE\r\nNonce={DisplayUtils.BytesToHex(envelope.Nonce.ToByteArray())}" +
-            $"\r\nCipherTextSHA256={DisplayUtils.BytesToHex(SHA256.HashData(envelope.Ciphertext.ToByteArray()))}" +
-            $"\r\nAD={DisplayUtils.BytesToHex(envelope.AssociatedData.ToByteArray())}" +
-            $"\r\nTag={DisplayUtils.BytesToHex(envelope.Tag.ToByteArray())}");
+            $"\r\nENVELOPE\r\nNonce={Convert.ToHexString(envelope.Nonce.Span)}" +
+            $"\r\nCipherTextSHA256={Convert.ToHexString(SHA256.HashData(envelope.Ciphertext.Span))}" +
+            $"\r\nAD={Convert.ToHexString(envelope.AssociatedData.Span)}" +
+            $"\r\nTag={Convert.ToHexString(envelope.Tag.Span)}");
     }
 
     internal static void Dump(this DirectedMessage dm, ILogger? logger = null)
@@ -32,14 +32,14 @@ internal static class MessageUtils
          "\r\nsrc={SrcIdentityPublicKeyThumbprint}" +
          "\r\ndst={DstIdentityPublicKeyThumbprint}" +
          "\r\nsig={Signature}",
-         DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint.ToByteArray()),
-         DisplayUtils.BytesToHex(dm.DstIdentityThumbprint.ToByteArray()),
-         DisplayUtils.BytesToHex(SHA256.HashData(dm.Signature.ToByteArray())));
+         Convert.ToHexString(dm.SrcIdentityThumbprint.Span),
+         Convert.ToHexString(dm.DstIdentityThumbprint.Span),
+         Convert.ToHexString(SHA256.HashData(dm.Signature.Span)));
 
         Console.WriteLine(
-            $"\r\nDIRECTED MESSAGE\r\nsrc={DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint.ToByteArray())}" +
-            $"\r\ndst={DisplayUtils.BytesToHex(dm.DstIdentityThumbprint.ToByteArray())}" +
-            $"\r\nsigSHA256={DisplayUtils.BytesToHex(SHA256.HashData(dm.Signature.ToByteArray()))}");
+            $"\r\nDIRECTED MESSAGE\r\nsrc={Convert.ToHexString(dm.SrcIdentityThumbprint.Span)}" +
+            $"\r\ndst={Convert.ToHexString(dm.DstIdentityThumbprint.Span)}" +
+            $"\r\nsigSHA256={Convert.ToHexString(SHA256.HashData(dm.Signature.Span))}");
     }
 
     internal static bool IsValid(this ForwardedMessage fwd, ILogger? logger = null)

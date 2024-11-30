@@ -31,8 +31,10 @@ public class DhtClientApp : IClientApp
         this.appContext = appContext;
 
         // Load Console Commands
-        var consoleCommandTypes = Assembly.GetExecutingAssembly().GetTypes().Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IConsoleCommand).FullName) == 0)).ToArray();
-        foreach (var consoleCommandType in consoleCommandTypes)
+        foreach (var consoleCommandType in Assembly.GetExecutingAssembly().GetTypes()
+            .Where(t =>
+                t.IsClass
+                && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IConsoleCommand).FullName) == 0)))
         {
             var objApp = Activator.CreateInstance(consoleCommandType, true);
 #pragma warning disable IDE0019 // Use pattern matching

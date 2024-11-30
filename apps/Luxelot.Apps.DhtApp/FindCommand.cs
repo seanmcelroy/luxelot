@@ -13,12 +13,11 @@ public class FindCommand : IConsoleCommand
 
     public string[] InteractiveAliases => [];
 
-    public string ShortHelp => "Lists the current entries in distributed hash tables.  If no DHT is specified, the Node DHT is enumerated";
+    public string ShortHelp => "Attempts to find the value from the network for a given KEY in a particular DHT_NUMBER table";
 
-    public string Usage => "entries [DHT_NUMBER]";
+    public string Usage => "find <DHT_NUMBER> <KEY>";
 
-    public string Example => "entries (OR) entries 1";
-
+    public string Example => "find 0 593EEFC175710C9831AC67C2684508BD9A1627CD14207C696E0949D24C2F2D22";
 
     public void OnInitialize(IAppContext appContext)
     {
@@ -31,12 +30,12 @@ public class FindCommand : IConsoleCommand
         ArgumentNullException.ThrowIfNull(appContext);
         ArgumentNullException.ThrowIfNull(words);
 
-        if (words.Length != 1 && words.Length != 2)
-            return (false, "Command requires zero or one argument, the optional directory to list.");
+        if (words.Length != 3)
+            return (false, "Command requires two arguments, the DHT table to search (0=Node, 1=Binary) and the key to search for.");
 
         var dhtTableType = DhtTableType.Node;
-        if (words.Length == 2 && int.TryParse(words[1], out int i) && Enum.GetValues<DhtTableType>().Select(t => (int)t).Contains(i))
-            dhtTableType = (DhtTableType)i;
+        if (!int.TryParse(words[1], out int i) || !Enum.GetValues<DhtTableType>().Select(t => (int)t).Contains(i))
+            return (false, $"Argument one mjst be the DHT table to search for.  Valid values are {Enum.GetValues<DhtTableType>().Select(t => ((int)t).ToString()).Aggregate((c, n) => c + "," + n)}.");
 
         if (!appContext.TryGetSingleton(out DhtServerApp? dhtServerApp)
             || dhtServerApp == null)
@@ -47,22 +46,7 @@ public class FindCommand : IConsoleCommand
 
         var dht = dhtServerApp.Tables[dhtTableType];
 
-        var sb = new StringBuilder();
-        sb.AppendLine("\r\nDHT Entry List");
-
-        var dhtEntries = ((ICollection<BucketEntry>)dht).ToArray();
-        if (dhtEntries.Length > 0)
-        {
-            var dht_key_len = dhtEntries.Max(be => DisplayUtils.BytesToHex(be.Key)[..8].Length);
-            sb.AppendLine($"{"DhtKey".PadRight(dht_key_len)} DhtEntry");
-
-            foreach (var bucketEntry in dhtEntries)
-            {
-                sb.AppendLine($"{DisplayUtils.BytesToHex(bucketEntry.Key)[..8]} {bucketEntry.Value}");
-            }
-        }
-        sb.AppendLine("End of DHT Entry List");
-        await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
+        throw new NotImplementedException();
         return (true, null);
     }
 }

@@ -35,7 +35,7 @@ public interface IAppContext
 
     public Envelope EncryptEnvelope(byte[] envelope_payload_bytes, ImmutableArray<byte> sessionSharedKey, ILogger? logger);
 
-    public byte[]? DecryptEnvelope(Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger);
+    public ReadOnlySpan<byte> DecryptEnvelope(Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger);
 
     public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class;
 

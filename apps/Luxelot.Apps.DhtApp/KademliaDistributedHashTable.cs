@@ -50,13 +50,10 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
         return 0;
     }
 
-    public static byte[] GetDistanceMetric(IList<byte> key1, IList<byte> key2)
+    public static byte[] GetDistanceMetric(ReadOnlySpan<byte> key1, ReadOnlySpan<byte> key2)
     {
-        ArgumentNullException.ThrowIfNull(key1);
-        ArgumentNullException.ThrowIfNull(key2);
-
-        var k1c = key1.Count;
-        var k2c = key2.Count;
+        var k1c = key1.Length;
+        var k2c = key2.Length;
 
         if (k1c != k2c)
             throw new ArgumentException($"Both keys must be of the same length, but key1 len was {k1c} and key2 len was {k2c}", nameof(key1));
@@ -190,11 +187,11 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
 
     IEnumerator<BucketEntry> IEnumerable<BucketEntry>.GetEnumerator() => Buckets.Where(b => b != default).SelectMany(b => b.Entries.Where(be => be != default)).GetEnumerator();
 
-    public IEnumerable<BucketEntry> FindClosest(IList<byte> target, int count) =>
+    public IEnumerable<BucketEntry> FindClosest(Memory<byte> target, int count) =>
         ((IEnumerable<BucketEntry>)this).Select(be => new
         {
             Entry = be,
-            Distance = GetDistanceMetric(be.Key, target)
+            Distance = GetDistanceMetric(be.Key.AsSpan(), target.Span)
 
         })
         .OrderBy(x => x.Distance)

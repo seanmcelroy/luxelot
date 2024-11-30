@@ -246,7 +246,7 @@ internal static class CryptoUtils
         {
             try
             {
-                using ChaCha20Poly1305 cha = new([.. sharedKey]);
+                using ChaCha20Poly1305 cha = new(sharedKey.Value.AsSpan());
                 RandomNumberGenerator.Fill(nonce);
                 RandomNumberGenerator.Fill(associated_data);
                 cha.Encrypt(nonce, plain_text, cipher_text, tag, associated_data);
@@ -271,7 +271,7 @@ internal static class CryptoUtils
         return envelope;
     }
 
-    internal static byte[] DecryptEnvelopeInternal(Messages.Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger) => DecryptEnvelopeInternal(new Apps.Common.Envelope
+    internal static ReadOnlySpan<byte> DecryptEnvelopeInternal(Messages.Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger) => DecryptEnvelopeInternal(new Apps.Common.Envelope
     {
         Nonce = envelope.Nonce.Span,
         Ciphertext = envelope.Ciphertext.Span,
@@ -279,12 +279,12 @@ internal static class CryptoUtils
         AssociatedData = envelope.AssociatedData.Span,
     }, sharedKey, logger);
 
-    internal static byte[] DecryptEnvelopeInternal(Apps.Common.Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger)
+    internal static ReadOnlySpan<byte> DecryptEnvelopeInternal(Apps.Common.Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger)
     {
         if (sharedKey == null)
         {
             // Loopback
-            return envelope.Ciphertext.ToArray();
+            return envelope.Ciphertext;
         }
 
         //MessageUtils.Dump(envelope, logger);
@@ -292,13 +292,13 @@ internal static class CryptoUtils
 
         try
         {
-            using ChaCha20Poly1305 cha = new([.. sharedKey]);
+            using ChaCha20Poly1305 cha = new(sharedKey.Value.AsSpan());
             cha.Decrypt(
-                envelope.Nonce.ToArray()
-                , envelope.Ciphertext.ToArray()
-                , envelope.Tag.ToArray()
+                envelope.Nonce
+                , envelope.Ciphertext
+                , envelope.Tag
                 , envelope_plain_text
-                , envelope.AssociatedData.ToArray());
+                , envelope.AssociatedData);
         }
         catch (AuthenticationTagMismatchException atme)
         {

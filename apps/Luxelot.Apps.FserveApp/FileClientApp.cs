@@ -53,8 +53,10 @@ public class FileClientApp : IClientApp
         this.appContext = appContext;
 
         // Load Console Commands
-        var consoleCommandTypes = Assembly.GetExecutingAssembly().GetTypes().Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IConsoleCommand).FullName) == 0)).ToArray();
-        foreach (var consoleCommandType in consoleCommandTypes)
+        foreach (var consoleCommandType in Assembly.GetExecutingAssembly().GetTypes()
+            .Where(t => 
+                t.IsClass 
+                && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IConsoleCommand).FullName) == 0)))
         {
             var objApp = Activator.CreateInstance(consoleCommandType, true);
 #pragma warning disable IDE0019 // Use pattern matching
@@ -231,7 +233,7 @@ public class FileClientApp : IClientApp
             chunks = candidates[0].Value;
         }
 
-        await appContext.SendConsoleMessage($"Starting download of {chunks.Length} chunk(s) from {DisplayUtils.BytesToHex(chunks[0].ServerThumbprint)[..8]}", cancellationToken);
+        await appContext.SendConsoleMessage($"Starting download of {chunks.Length} chunk(s) from {Convert.ToHexString(chunks[0].ServerThumbprint.AsSpan())[..8]}", cancellationToken);
 
         // Set state for what we are downloading for sequential chunk handling
         currentChunkGet = (chunks[0].DownloadTicket, 1);
@@ -266,7 +268,7 @@ public class FileClientApp : IClientApp
 
         if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
         {
-            appContext.Logger?.LogError("FSERVE AuthChannelResponse received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, DisplayUtils.BytesToHex(ServerThumbprint));
+            appContext.Logger?.LogError("FSERVE AuthChannelResponse received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, Convert.ToHexString(ServerThumbprint.Value.AsSpan()));
             return true;
         }
 
@@ -310,7 +312,7 @@ public class FileClientApp : IClientApp
 
         if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
         {
-            appContext.Logger?.LogError("FSERVE Status received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, DisplayUtils.BytesToHex(ServerThumbprint));
+            appContext.Logger?.LogError("FSERVE Status received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, Convert.ToHexString(ServerThumbprint.Value.AsSpan()));
             return true;
         }
         appContext.Logger?.LogInformation("FSERVE Status received from {SourceThumbprint}: {StatusCode} {StatusMessage}", requestContext.RequestSourceThumbprintHex, status.StatusCode, status.StatusMessage);
@@ -345,7 +347,7 @@ public class FileClientApp : IClientApp
 
         if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
         {
-            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, DisplayUtils.BytesToHex(ServerThumbprint));
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, Convert.ToHexString(ServerThumbprint.Value.AsSpan()));
             return true;
         }
         appContext.Logger?.LogInformation("Received from {SourceThumbprint}: {StatusCode} {StatusMessage}", requestContext.RequestSourceThumbprintHex, listResponse.StatusCode, listResponse.StatusMessage);
@@ -383,7 +385,7 @@ public class FileClientApp : IClientApp
 
         if (!Enumerable.SequenceEqual(requestContext.RequestSourceThumbprint, ServerThumbprint))
         {
-            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, DisplayUtils.BytesToHex(ServerThumbprint));
+            appContext.Logger?.LogError("Received from {SourceThumbprint}, but currently connected to {ServerThumbprint}. Ignoring.", requestContext.RequestSourceThumbprintHex, Convert.ToHexString(ServerThumbprint.Value.AsSpan()));
             return true;
         }
         appContext.Logger?.LogInformation("Received from {SourceThumbprint}: Download ready for {Filename} via ticket {Ticket}", requestContext.RequestSourceThumbprintHex, dr.File, dr.Ticket);
@@ -421,7 +423,7 @@ public class FileClientApp : IClientApp
         var sb = new StringBuilder();
         sb.AppendLine($"Download ready '{dr.File}': Use ticket {dr.Ticket} to retrieve {dr.ChunkCount} chunks.  Total file size {dr.Size}");
         foreach (var chunk in dr.Chunks)
-            sb.AppendLine($"Chunk#{chunk.Seq}: {chunk.Size} bytes, hash={DisplayUtils.BytesToHex(chunk.Hash)[..16]}...");
+            sb.AppendLine($"Chunk#{chunk.Seq}: {chunk.Size} bytes, hash={Convert.ToHexString(chunk.Hash.Span)[..16]}...");
         sb.AppendLine("End of Download Ready");
         await appContext.SendConsoleMessage(sb.ToString(), cancellationToken);
         return true;

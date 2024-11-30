@@ -48,7 +48,7 @@ internal class Peer : IDisposable
         State = PeerState.ESTABLISHED;
 
         IdentityPublicKeyThumbprint = new byte[Constants.THUMBPRINT_LEN].ToImmutableArray();
-        Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
+        Name = Convert.ToHexString(IdentityPublicKeyThumbprint.Value.AsSpan());
         ShortName = $"{Name[..8]}";
     }
 
@@ -152,7 +152,7 @@ internal class Peer : IDisposable
         //MessageUtils.Dump(envelope, nodeContext.Logger);
         //Console.WriteLine($"SESSION KEY HASH={CryptoUtils.BytesToHex(SHA256.HashData(SessionSharedKey))}");
 
-        byte[] envelope_plain_text;
+        ReadOnlySpan<byte> envelope_plain_text;
         try
         {
             envelope_plain_text = CryptoUtils.DecryptEnvelopeInternal(envelope, SessionSharedKey, nodeContext.Logger);
@@ -167,7 +167,7 @@ internal class Peer : IDisposable
         EnvelopePayload envelopePayload;
         try
         {
-            envelopePayload = EnvelopePayload.Parser.ParseFrom(envelope_plain_text, 0, envelope_plain_text.Length);
+            envelopePayload = EnvelopePayload.Parser.ParseFrom(envelope_plain_text);
         }
         catch (InvalidProtocolBufferException ex)
         {
@@ -200,7 +200,7 @@ internal class Peer : IDisposable
                 return true;
             }
 
-            nodeContext.Logger?.LogDebug("FORWARD FROM {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", ShortName, RemoteEndPoint, DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint), fwd.ForwardId);
+            nodeContext.Logger?.LogDebug("FORWARD FROM {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", ShortName, RemoteEndPoint, Convert.ToHexString(fwd.DstIdentityThumbprint.Span), fwd.ForwardId);
 
             // Have I seen this message before?
             if (nodeContext.RegisterForwardId(fwd.ForwardId))
@@ -265,22 +265,21 @@ internal class Peer : IDisposable
 
                     if (fwd.SrcIdentityThumbprint == null)
                     {
-                        nodeContext.Logger?.LogWarning("Discarding forward with missing src intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
+                        nodeContext.Logger?.LogWarning("Discarding forward with missing src intended for {DestinationThumbprint}.", Convert.ToHexString(fwd.DstIdentityThumbprint.Span));
                         return true;
                     }
 
                     // If we are aware of the public key of the origin, then validate the forwarded message.
-                    ImmutableArray<byte> fwd_origin_pub_thumbprint = [.. fwd.SrcIdentityThumbprint];
 
-                    if (nodeContext.IsKnownInvalidSignature(fwd_origin_pub_thumbprint, fwd.Payload.ToByteArray, fwd.Signature.ToByteArray))
+                    if (nodeContext.IsKnownInvalidSignature(fwd.SrcIdentityThumbprint.Span, fwd.Payload.ToByteArray, fwd.Signature.ToByteArray))
                     {
-                        nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(fwd.DstIdentityThumbprint));
+                        nodeContext.Logger?.LogWarning("Discarding corrupt forward intended for {DestinationThumbprint}.", Convert.ToHexString(fwd.DstIdentityThumbprint.Span));
                         return true;
                     }
 
                     try
                     {
-                        return await HandleMessage(nodeContext, fwd_origin_pub_thumbprint, fwd.Payload, cancellationToken);
+                        return await HandleMessage(nodeContext, [.. fwd.SrcIdentityThumbprint], fwd.Payload, cancellationToken);
                     }
                     catch (Exception ex)
                     {
@@ -320,8 +319,7 @@ internal class Peer : IDisposable
         nodeContext.Logger?.LogDebug("DM RECEIVED FROM {PeerShortName} ({RemoteEndPoint}): {PayloadType}", ShortName, RemoteEndPoint, dm.Payload.TypeUrl);
         //MessageUtils.Dump(dm, nodeContext.Logger);
 
-        ImmutableArray<byte> srcThumbprintBytes = [.. dm.SrcIdentityThumbprint.ToByteArray()];
-        var isSignatureValid = IsLoopback || !nodeContext.IsKnownInvalidSignature(srcThumbprintBytes, dm.Payload.ToByteArray, dm.Signature.ToByteArray);
+        var isSignatureValid = IsLoopback || !nodeContext.IsKnownInvalidSignature(dm.SrcIdentityThumbprint.Span, dm.Payload.ToByteArray, dm.Signature.ToByteArray);
 
         // Is this destined for me?
         if (!IsLoopback && !Enumerable.SequenceEqual(nodeContext.NodeIdentityKeyPublicThumbprint, dm.DstIdentityThumbprint))
@@ -329,14 +327,14 @@ internal class Peer : IDisposable
             // It is NOT destined for me.  But can I be useful and verify the signature so I do not forward corruption?
             if (!isSignatureValid)
             {
-                nodeContext.Logger?.LogWarning("Discarding corrupt message intended for {DestinationThumbprint}.", DisplayUtils.BytesToHex(dm.DstIdentityThumbprint));
+                nodeContext.Logger?.LogWarning("Discarding corrupt message intended for {DestinationThumbprint}.", Convert.ToHexString(dm.DstIdentityThumbprint.Span));
                 return true;
             }
 
             // Okay, it was NOT destined for me, but it was not wrapped as a forward.
             // This peer must be confused, or it has intentionally done this to get me to cough up my table of immediate neighbors.
             // Which I will do.  TODO Consider security implications vs. utility of this behavior.
-            nodeContext.Logger?.LogInformation("Misdirected direct message intended for {DestinationThumbprint} from {PeerShortName}; returning unreachable error.", DisplayUtils.BytesToHex(dm.DstIdentityThumbprint), ShortName);
+            nodeContext.Logger?.LogInformation("Misdirected direct message intended for {DestinationThumbprint} from {PeerShortName}; returning unreachable error.", Convert.ToHexString(dm.DstIdentityThumbprint.Span), ShortName);
             var neighbors = nodeContext.GetNeighborThumbprints();
             var err = new ErrorDestinationUnreachable
             {
@@ -354,7 +352,7 @@ internal class Peer : IDisposable
 
         if (!isSignatureValid)
         {
-            nodeContext.Logger?.LogError("Discarding message with invalid signature from {SourceThumbprint} intended for me.", DisplayUtils.BytesToHex(dm.SrcIdentityThumbprint));
+            nodeContext.Logger?.LogError("Discarding message with invalid signature from {SourceThumbprint} intended for me.", Convert.ToHexString(dm.SrcIdentityThumbprint.Span));
             return false;
         }
 
@@ -427,10 +425,10 @@ internal class Peer : IDisposable
         var id_pub_key_bytes = syn.IdPubKey.ToByteArray();
         IdentityPublicKey = id_pub_key_bytes.ToImmutableArray();
         IdentityPublicKeyThumbprint = SHA256.HashData(id_pub_key_bytes).ToImmutableArray();
-        Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
+        Name = Convert.ToHexString(IdentityPublicKeyThumbprint.Value.AsSpan());
         ShortName = $"{Name[..8]}";
 
-        nodeContext.Logger?.LogDebug("ID Key for {PeerShortName} ({RemoteEndPoint}) is thumbprint {Thumbprint}", ShortName, RemoteEndPoint, DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint));
+        nodeContext.Logger?.LogDebug("ID Key for {PeerShortName} ({RemoteEndPoint}) is thumbprint {Thumbprint}", ShortName, RemoteEndPoint, Convert.ToHexString(IdentityPublicKeyThumbprint.Value.AsSpan()));
         nodeContext.Logger?.LogDebug("Sending Ack to peer {PeerShortName} ({RemoteEndPoint})", ShortName, RemoteEndPoint);
 
         byte[] addrBytes = new byte[16];
@@ -447,7 +445,7 @@ internal class Peer : IDisposable
             ProtVer = Node.NODE_PROTOCOL_VERSION,
             CipherText = ByteString.CopyFrom(encapsulatedKey),
             // Now provide our own identity key in the response Ack
-            IdPubKey = ByteString.CopyFrom([.. nodeContext.NodeIdentityKeyPublicBytes]),
+            IdPubKey = ByteString.CopyFrom(nodeContext.NodeIdentityKeyPublicBytes.AsSpan()),
             Addr1 = addrs[0],
             Addr2 = addrs[1],
             Addr3 = addrs[2],
@@ -527,7 +525,7 @@ internal class Peer : IDisposable
         var id_pub_key_bytes = ack.IdPubKey.ToByteArray();
         IdentityPublicKey = id_pub_key_bytes.ToImmutableArray();
         IdentityPublicKeyThumbprint = SHA256.HashData(id_pub_key_bytes).ToImmutableArray();
-        Name = DisplayUtils.BytesToHex(IdentityPublicKeyThumbprint);
+        Name = Convert.ToHexString(IdentityPublicKeyThumbprint.Value.AsSpan());
         ShortName = $"{Name[..8]}";
 
         if (State != PeerState.ESTABLISHED)
@@ -565,7 +563,7 @@ internal class Peer : IDisposable
 
     internal async Task<bool> HandleMessage(NodeContext nodeContext, ImmutableArray<byte> sourceThumbprint, Any message, CancellationToken cancellationToken)
     {
-        using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleMessage)} from {DisplayUtils.BytesToHex(sourceThumbprint)[..8]} ({RemoteEndPoint})");
+        using var scope = nodeContext.Logger?.BeginScope($"{nameof(HandleMessage)} from {Convert.ToHexString(sourceThumbprint.AsSpan())[..8]} ({RemoteEndPoint})");
 
         ArgumentNullException.ThrowIfNull(message);
 
@@ -582,7 +580,7 @@ internal class Peer : IDisposable
                 {
                     var err = any.Unpack<ErrorDestinationUnreachable>();
                     nodeContext.Logger?.LogInformation("ErrorDestinationUnreachable from {PeerShortName} ({RemoteEndPoint}): {NeighborCount} neighbors provided", ShortName, RemoteEndPoint, err.NeighborThumbprints.Count);
-                    await nodeContext.WriteLineToUserAsync($"DESTINATION UNREACHABLE FOR {DisplayUtils.BytesToHex(err.UnreachableIdentityThumbprint)} VIA {ShortName}", cancellationToken);
+                    await nodeContext.WriteLineToUserAsync($"DESTINATION UNREACHABLE FOR {Convert.ToHexString(err.UnreachableIdentityThumbprint.Span)} VIA {ShortName}", cancellationToken);
                     return true;
                 }
             default:

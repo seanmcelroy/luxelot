@@ -62,7 +62,7 @@ public class PingCommand : IConsoleCommand
             if (samesies)
                 appContext.Logger?.LogInformation("PING to {PeerShortName}: {Contents}", routingPeerShortName, $"id={ping.Identifier} seq={ping.Sequence}");
             else
-                appContext.Logger?.LogInformation("PING to {PeerShortName} with final destination of {DestinationThumbprint}: {Contents}", routingPeerShortName, DisplayUtils.BytesToHex(ultimateDestinationThumbprint.Value), $"id={ping.Identifier} seq={ping.Sequence}");
+                appContext.Logger?.LogInformation("PING to {PeerShortName} with final destination of {DestinationThumbprint}: {Contents}", routingPeerShortName, Convert.ToHexString(ultimateDestinationThumbprint.Value.AsSpan()), $"id={ping.Identifier} seq={ping.Sequence}");
             return (success, null);
         }
         else

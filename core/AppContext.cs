@@ -147,7 +147,7 @@ internal class AppContext : IAppContext
         };
     }
 
-    public byte[]? DecryptEnvelope(Apps.Common.Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger) => CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
+    public ReadOnlySpan<byte> DecryptEnvelope(Apps.Common.Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger) => CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
 
     public async Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken) => await Node.EnterAppInteractiveMode(clientAppName, cancellationToken);
 

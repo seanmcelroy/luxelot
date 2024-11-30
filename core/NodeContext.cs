@@ -7,13 +7,13 @@ using Microsoft.Extensions.Logging;
 
 namespace Luxelot;
 
-internal readonly struct NodeContext(Node node)
+internal readonly record struct NodeContext(Node Node)
 {
     public required readonly string NodeShortName { get; init; }
     public required readonly ImmutableArray<byte> NodeIdentityKeyPublicBytes { get; init; }
     public required readonly ImmutableArray<byte> NodeIdentityKeyPublicThumbprint { get; init; }
     public required readonly ILogger? Logger { get; init; }
-    private readonly Node _node = node;
+    private readonly Node _node = Node;
 
     public IEnumerable<ImmutableArray<byte>> GetNeighborThumbprints() => _node.GetNeighborThumbprints();
 
@@ -48,7 +48,7 @@ internal readonly struct NodeContext(Node node)
     internal void RaisePeerConnected(Peer peer) => _node.RaisePeerConnected(peer);
 
     internal bool IsKnownInvalidSignature(
-        ImmutableArray<byte> thumbprint,
+        ReadOnlySpan<byte> thumbprint,
         Func<byte[]> message,
         Func<byte[]> signature) => _node.IsKnownInvalidSignature(thumbprint, message, signature);
 

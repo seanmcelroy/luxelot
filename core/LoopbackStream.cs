@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Dynamic;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot;
@@ -8,7 +7,7 @@ namespace Luxelot;
 public class LoopbackStream : Stream
 {
     private ILogger? Logger { get; init; }
-    private ConcurrentQueue<MemoryStream> _inner = new();
+    private ConcurrentQueue<byte[]> _inner = new();
     private readonly Mutex _innerMutex = new();
     private int _readTimeout { get; set; } = int.MaxValue;
     private int _writeTimeout { get; set; } = int.MaxValue;
@@ -51,7 +50,7 @@ public class LoopbackStream : Stream
         else
             Logger?.LogTrace("Read took {ElapsedMilliseconds} to acquire mutex", sw.ElapsedMilliseconds);
 
-        var peeked = _inner.TryPeek(out MemoryStream? peek);
+        var peeked = _inner.TryPeek(out byte[]? peek);
         if (!peeked || peek == null)
         {
             // Nothing in queue, wait for data available
@@ -66,10 +65,10 @@ public class LoopbackStream : Stream
         {
             // There are bytes, and we want less than the next inner stream has, so give it all
             var bytes = peek.ToArray();
-            _inner.TryDequeue(out MemoryStream? _);
+            _inner.TryDequeue(out byte[]? _);
             _innerMutex.ReleaseMutex();
             Array.Copy(bytes, buffer, peek.Length);
-            return (int)peek.Length;
+            return peek.Length;
         }
 
         // There are bytes, and we want more than the next inner stream has, so give it all
@@ -79,10 +78,10 @@ public class LoopbackStream : Stream
             Array.Copy(bytes, buffer, count);
             Array.Copy(bytes, count, bytesToPreserve, 0, bytesToPreserve.Length);
 
-            _inner.TryDequeue(out MemoryStream? _);
+            _inner.TryDequeue(out byte[]? _);
             var remainder = _inner.ToList();
-            remainder.Insert(0, new MemoryStream(bytesToPreserve));
-            _inner = new ConcurrentQueue<MemoryStream>(remainder); ;
+            remainder.Insert(0, bytesToPreserve);
+            _inner = new ConcurrentQueue<byte[]>(remainder); ;
             _innerMutex.ReleaseMutex();
             return count;
         }
@@ -104,7 +103,7 @@ public class LoopbackStream : Stream
 
         var bytes = new byte[count];
         Array.Copy(buffer, offset, bytes, 0, count);
-        _inner.Enqueue(new MemoryStream([.. bytes]));
+        _inner.Enqueue([.. bytes]);
         _innerMutex.ReleaseMutex();
     }
 
@@ -118,7 +117,7 @@ public class LoopbackStream : Stream
         else
             Logger?.LogTrace("WriteAsync took {ElapsedMilliseconds} to acquire mutex", sw.ElapsedMilliseconds);
 
-        _inner.Enqueue(new MemoryStream([.. buffer.ToArray()]));
+        _inner.Enqueue([.. buffer.ToArray()]);
         _innerMutex.ReleaseMutex();
         return ValueTask.CompletedTask;
     }

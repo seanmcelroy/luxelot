@@ -62,7 +62,7 @@ internal class Node : INode
     {
         PeerConnected += (sender, args) =>
         {
-            var thumbprintHex = DisplayUtils.BytesToHex(args.Thumbprint);
+            var thumbprintHex = Convert.ToHexString(args.Thumbprint.AsSpan());
             ThumbprintPublicKeyCache?.Set(thumbprintHex, args.PublicKey);
         };
     }
@@ -76,7 +76,7 @@ internal class Node : INode
         IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
         IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
         IdentityKeyPrivateBytes = [.. ((DilithiumPrivateKeyParameters)acp.Private).GetEncoded()];
-        Name = DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint);
+        Name = Convert.ToHexString(IdentityKeyPublicThumbprint.AsSpan());
         ShortName = $"{Name[..8]}...";
         Logger = loggerFactory.CreateLogger($"Node {ShortName}");
         Logger.LogInformation("Recreated node with identity key thumbprint {Thumbprint}", Name);
@@ -97,7 +97,7 @@ internal class Node : INode
         IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
         IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
         IdentityKeyPrivateBytes = [.. ((DilithiumPrivateKeyParameters)acp.Private).GetEncoded()];
-        Name = DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint);
+        Name = Convert.ToHexString(IdentityKeyPublicThumbprint.AsSpan());
         if (string.IsNullOrWhiteSpace(shortName))
         {
             ShortName = $"{Name[..8]}...";
@@ -123,7 +123,7 @@ internal class Node : INode
     internal static Node? CreateFromEncryptedKeyContainer(
         ILogger logger,
         ILoggerFactory nodeLoggerFactory,
-        byte[] encryptedKeyContainer,
+        ReadOnlySpan<byte> encryptedKeyContainer,
         string salt62,
         string? password,
         IPAddress listenAddress,
@@ -133,7 +133,6 @@ internal class Node : INode
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(nodeLoggerFactory);
-        ArgumentNullException.ThrowIfNull(encryptedKeyContainer);
         ArgumentNullException.ThrowIfNull(salt62);
 
         string json;
@@ -202,8 +201,7 @@ internal class Node : INode
         else
         {
             Logger?.LogInformation("Looking for plugins to load in {AssemblyPath}", assemblyPath);
-            var potentialPlugins = Directory.EnumerateFiles(assemblyPath, "*App.dll").ToArray();
-            foreach (var potentialPlugin in potentialPlugins)
+            foreach (var potentialPlugin in Directory.EnumerateFiles(assemblyPath, "*App.dll"))
             {
                 await using var stream = File.OpenRead(potentialPlugin);
                 using var pe = new PEReader(stream);
@@ -361,8 +359,7 @@ internal class Node : INode
             var types = ass2.Assemblies.SelectMany(a => a.ExportedTypes).ToArray();
 
             // Load Server Apps
-            var serverAppTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IServerApp).FullName) == 0)).ToArray();
-            foreach (var serverAppType in serverAppTypes)
+            foreach (var serverAppType in types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IServerApp).FullName) == 0)))
             {
                 var objApp = Activator.CreateInstance(serverAppType, true);
 #pragma warning disable IDE0019 // Use pattern matching
@@ -383,8 +380,7 @@ internal class Node : INode
             }
 
             // Load Client Apps
-            var clientAppTypes = types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IClientApp).FullName) == 0)).ToArray();
-            foreach (var clientAppType in clientAppTypes)
+            foreach (var clientAppType in types.Where(t => t.IsClass && t.GetInterfaces().Any(t => string.CompareOrdinal(t.FullName, typeof(IClientApp).FullName) == 0)))
             {
                 var objApp = Activator.CreateInstance(clientAppType, true);
 #pragma warning disable IDE0019 // Use pattern matching
@@ -679,7 +675,7 @@ internal class Node : INode
                 else
                 {
                     // Okay, we made it!
-                    Logger?.LogDebug("Sending SynAck to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint!));
+                    Logger?.LogDebug("Sending SynAck to peer {PeerShortName} ({RemoteEndPoint}) thumbprint {Thumbprint}", peer.ShortName, peer.RemoteEndPoint, Convert.ToHexString(peer.IdentityPublicKeyThumbprint.Value.AsSpan()));
 
                     var parts = NetUtils.ConvertIPAddressToMessageIntegers(peer.RemoteEndPoint!.Address)!;
                     var payload = new SynAck
@@ -733,14 +729,14 @@ internal class Node : INode
                     if (string.IsNullOrWhiteSpace(result.ErrorMessage))
                     {
                         if (result.Command != null)
-                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? string.Empty : ActiveClientApp.InteractiveCommand + " ")}{result.Command.InteractiveCommand}", cancellationToken);
+                            await context.WriteLineToUserAsync($"ERROR: {ActiveClientApp.InteractiveCommand} {result.Command.InteractiveCommand}", cancellationToken);
                         else
                             await context.WriteLineToUserAsync($"ERROR", cancellationToken);
                     }
                     else
                     {
                         if (result.Command != null)
-                            await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? string.Empty : ActiveClientApp.InteractiveCommand + " ")}{result.Command.InteractiveCommand}: {result.ErrorMessage}", cancellationToken);
+                            await context.WriteLineToUserAsync($"ERROR: {ActiveClientApp.InteractiveCommand} {result.Command.InteractiveCommand}: {result.ErrorMessage}", cancellationToken);
                         else
                             await context.WriteLineToUserAsync($"ERROR: {result.ErrorMessage}", cancellationToken);
                     }
@@ -842,16 +838,16 @@ internal class Node : INode
                 }
 
             case "node":
-                await context.WriteLineToUserAsync($"ID Public Key: {DisplayUtils.BytesToHex(IdentityKeyPublicBytes)}", cancellationToken);
-                await context.WriteLineToUserAsync($"ID Thumbprint: {DisplayUtils.BytesToHex(IdentityKeyPublicThumbprint)}", cancellationToken);
+                await context.WriteLineToUserAsync($"ID Public Key: {Convert.ToHexString(IdentityKeyPublicBytes.AsSpan())}", cancellationToken);
+                await context.WriteLineToUserAsync($"ID Thumbprint: {Convert.ToHexString(IdentityKeyPublicThumbprint.AsSpan())}", cancellationToken);
                 return;
 
             case "peers":
                 {
                     var sb = new StringBuilder();
                     sb.AppendLine("\r\nPeer List");
-                    var peers = Peers.Values.ToArray();
-                    if (peers.Length > 0)
+                    var peers = Peers.Values;
+                    if (peers.Count > 0)
                     {
                         var state_len = peers.Max(p => p.State.ToString().Length);
                         var rep_len = peers.Max(p => p.RemoteEndPoint == null ? 0 : p.RemoteEndPoint.ToString()!.Length);
@@ -860,7 +856,7 @@ internal class Node : INode
                         sb.AppendLine($"PeerShortName {"State".PadRight(state_len)} {"RemoteEndPoint".PadRight(rep_len)} {"Recv".PadRight(recv_len)} {"Sent".PadRight(sent_len)} IdPubKeyThumbprint");
                         foreach (var peer in peers)
                         {
-                            sb.AppendLine($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State.ToString().PadRight(state_len)} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived.ToString().PadRight(recv_len)} {peer.BytesSent.ToString().PadRight(sent_len)} {DisplayUtils.BytesToHex(peer.IdentityPublicKeyThumbprint)}");
+                            sb.AppendLine($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State.ToString().PadRight(state_len)} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived.ToString().PadRight(recv_len)} {peer.BytesSent.ToString().PadRight(sent_len)} {(peer.IdentityPublicKeyThumbprint == null ? "(NULL)" : Convert.ToHexString(peer.IdentityPublicKeyThumbprint.Value.AsSpan()))}");
                         }
                     }
                     sb.AppendLine("End of Peer List");
@@ -882,7 +878,17 @@ internal class Node : INode
             default:
                 foreach (var ca in ClientApps)
                 {
-                    // Maybe it's a client app that has an interactive mode?
+                    // We support a few different types of command handling here:
+                    // 1. The module name to drop into its targeted interactive mode, like
+                    //    'fs' to target the fserve module.  In targeted mode, only 'fs'
+                    //    commands will match, and which can make it easier to use if there are
+                    //    cmomand conflicts named the same across different loaded modules.
+                    // 2. MODULE + COMMAND, like fs login
+                    // 3. MODULE+COMMAND, like fslogin (in case the user mistypes or wants a
+                    //    shorter unambiguous command tareting
+                    // 4. COMMAND, like 'ping', where it is unlikely to be a name conflict.
+
+                    // HERE IS #1
                     if (two_word_command == null
                         && ca.InteractiveCommand != null
                         && string.Compare(ca.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0)
@@ -892,10 +898,10 @@ internal class Node : INode
                         return;
                     }
 
-                    // Or maybe it's a command this client app loaded?
+                    // HERE IS #2, #3, and #4.
                     var two_word_matches = ca.Commands
                         .Where(cc => string.Compare($"{ca.InteractiveCommand} {cc.InteractiveCommand}", two_word_command, StringComparison.InvariantCultureIgnoreCase) == 0)
-                        .ToArray();
+                        .ToImmutableArray();
 
                     string[] words_parameters = two_word_matches.Length == 0
                         ? words
@@ -905,7 +911,7 @@ internal class Node : INode
                         ? ca.Commands.Where(cc =>
                             string.Compare($"{ca.InteractiveCommand}{cc.InteractiveCommand}", command, StringComparison.InvariantCultureIgnoreCase) == 0
                             || string.Compare(cc.InteractiveCommand, command, StringComparison.InvariantCultureIgnoreCase) == 0
-                        ).ToArray()
+                        ).ToImmutableArray()
                         : two_word_matches;
 
                     if (appCommandMatches.Length == 1)
@@ -914,6 +920,8 @@ internal class Node : INode
                         var (success, errorMessage) = await appCommand.Invoke(words_parameters, cancellationToken);
                         if (!success)
                             await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? string.Empty : ActiveClientApp.InteractiveCommand + " ")}{appCommand.InteractiveCommand}: {errorMessage}", cancellationToken);
+                        else if (!string.IsNullOrWhiteSpace(errorMessage))
+                            await context.WriteLineToUserAsync(errorMessage, cancellationToken);
                         return;
                     }
                 }
@@ -979,10 +987,10 @@ internal class Node : INode
                 {
                     ForwardId = forwardId,
                     Ttl = 20,
-                    SrcIdentityThumbprint = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]),
-                    DstIdentityThumbprint = ByteString.CopyFrom([.. ultimateDestinationThumbprint]),
+                    SrcIdentityThumbprint = ByteString.CopyFrom(IdentityKeyPublicThumbprint.AsSpan()),
+                    DstIdentityThumbprint = ByteString.CopyFrom(ultimateDestinationThumbprint.AsSpan()),
                     Payload = packed_payload,
-                    Signature = ByteString.CopyFrom(signature)
+                    Signature = ByteString.CopyFrom(signature.AsSpan())
                 };
             }
         }
@@ -1007,12 +1015,12 @@ internal class Node : INode
         byte[] signature;
         if (destinationIdPubKeyThumbprint.All(b => b == 0x00))
         {
-            src = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]);
+            src = ByteString.CopyFrom(destinationIdPubKeyThumbprint.AsSpan());
             signature = []; // No reason to sign loopback messages
         }
         else
         {
-            src = ByteString.CopyFrom([.. IdentityKeyPublicThumbprint]);
+            src = ByteString.CopyFrom(IdentityKeyPublicThumbprint.AsSpan());
             var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPublicBytes]);
             var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPrivateBytes], pub);
 
@@ -1026,9 +1034,9 @@ internal class Node : INode
             // The source is my own node.
             SrcIdentityThumbprint = src,
             // The desitnation is some other node I know by its thumbprint.
-            DstIdentityThumbprint = ByteString.CopyFrom([.. destinationIdPubKeyThumbprint]),
+            DstIdentityThumbprint = ByteString.CopyFrom(destinationIdPubKeyThumbprint.AsSpan()),
             Payload = packed_payload,
-            Signature = ByteString.CopyFrom(signature),
+            Signature = ByteString.CopyFrom(signature.AsSpan()),
         };
 
         return dm;
@@ -1068,7 +1076,7 @@ internal class Node : INode
         {
             var envelope = peer.PrepareEnvelope(original, logger);
             await peer.SendEnvelope(envelope, logger, cancellationToken);
-            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(original.DstIdentityThumbprint), original.ForwardId);
+            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, Convert.ToHexString(original.DstIdentityThumbprint.Span), original.ForwardId);
         }
     }
 
@@ -1083,7 +1091,7 @@ internal class Node : INode
 
         // This cache is keyed by string representations of thumbprints.
         // The cache value is the peer short name
-        var cacheKey = DisplayUtils.BytesToHex(thumbprint);
+        var cacheKey = Convert.ToHexString(thumbprint.Value.AsSpan());
 
         ThumbprintPeerPaths.Set(cacheKey, peer.ShortName, new MemoryCacheEntryOptions
         {
@@ -1117,7 +1125,7 @@ internal class Node : INode
                 continue;
             var envelope = peer.PrepareEnvelope(relayed, logger);
             await peer.SendEnvelope(envelope, logger, cancellationToken);
-            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, DisplayUtils.BytesToHex(relayed.DstIdentityThumbprint), relayed.ForwardId);
+            Logger?.LogDebug("FORWARD to {PeerShortName} ({RemoteEndPoint}) intended for {DestinationThumbprint}: ForwardId={ForwardId}", peer.ShortName, peer.RemoteEndPoint, Convert.ToHexString(relayed.DstIdentityThumbprint.Span), relayed.ForwardId);
         }
     }
 
@@ -1164,8 +1172,8 @@ internal class Node : INode
     {
         var kc = new KeyContainer
         {
-            PublicKeyBase64 = Convert.ToBase64String([.. IdentityKeyPublicBytes]),
-            PrivateKeyBase64 = Convert.ToBase64String([.. IdentityKeyPrivateBytes])
+            PublicKeyBase64 = Convert.ToBase64String(IdentityKeyPublicBytes.AsSpan()),
+            PrivateKeyBase64 = Convert.ToBase64String(IdentityKeyPrivateBytes.AsSpan())
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(kc);
@@ -1237,12 +1245,12 @@ internal class Node : INode
     }
 
     internal bool IsKnownInvalidSignature(
-        ImmutableArray<byte> thumbprint,
+        ReadOnlySpan<byte> thumbprint,
         Func<byte[]> message,
         Func<byte[]> signature)
     {
 
-        var thumbprintHex = DisplayUtils.BytesToHex(thumbprint);
+        var thumbprintHex = Convert.ToHexString(thumbprint);
         if (!ThumbprintPublicKeyCache.TryGetValue(thumbprintHex, out ImmutableArray<byte> publicKey))
             return false;
 
