@@ -277,7 +277,7 @@ public class FileClientApp : IClientApp
             throw new InvalidOperationException("Shared key already computed!");
         if (SessionPrivateKey == null)
             throw new InvalidOperationException("Private key not set!");
-        SessionSharedKey = appContext.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. acr.CipherText], appContext.Logger);
+        SessionSharedKey = appContext.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, acr.CipherText.Span, appContext.Logger);
 
         appContext.Logger?.LogInformation("FSERVE AuthChannelResponse received from {SourceThumbprint}. Session shared key established.", requestContext.RequestSourceThumbprintHex);
 

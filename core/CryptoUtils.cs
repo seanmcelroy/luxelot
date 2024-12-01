@@ -132,7 +132,7 @@ internal static class CryptoUtils
         return privateKeyBytes;
     }
 
-    internal static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey, ILogger? logger)
+    internal static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ReadOnlySpan<byte> publicKey, ILogger? logger)
     {
         var secretKeyWithEncapsulationSender = GenerateChrystalsKyberEncryptionKey(publicKey, logger);
 
@@ -145,7 +145,7 @@ internal static class CryptoUtils
         return (encapsulatedKey, sessionSharedKey);
     }
 
-    private static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ImmutableArray<byte> publicKeyBytes, ILogger? logger)
+    private static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ReadOnlySpan<byte> publicKeyBytes, ILogger? logger)
     {
         KyberPublicKeyParameters publicKey = new(KyberParameters.kyber1024, [.. publicKeyBytes]);
         ISecretWithEncapsulation secret_with_encapsulation;
@@ -179,13 +179,13 @@ internal static class CryptoUtils
         return secret_with_encapsulation;
     }
 
-    internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
+    internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ReadOnlySpan<byte> encapsulatedKey, ILogger? logger)
     {
         var privateKey = new KyberPrivateKeyParameters(KyberParameters.kyber1024, [.. privateKeyBytes]);
         return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey, logger);
     }
 
-    internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ImmutableArray<byte> encapsulatedKey, ILogger? logger)
+    internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ReadOnlySpan<byte> encapsulatedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(privateKey);
 
@@ -271,7 +271,7 @@ internal static class CryptoUtils
         return envelope;
     }
 
-    internal static ReadOnlySpan<byte> DecryptEnvelopeInternal(Messages.Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger) => DecryptEnvelopeInternal(new Apps.Common.Envelope
+    internal static ReadOnlySpan<byte> DecryptEnvelopeInternal(Messages.Envelope envelope, ReadOnlySpan<byte> sharedKey, ILogger? logger) => DecryptEnvelopeInternal(new Apps.Common.Envelope
     {
         Nonce = envelope.Nonce.Span,
         Ciphertext = envelope.Ciphertext.Span,
@@ -279,9 +279,9 @@ internal static class CryptoUtils
         AssociatedData = envelope.AssociatedData.Span,
     }, sharedKey, logger);
 
-    internal static ReadOnlySpan<byte> DecryptEnvelopeInternal(Apps.Common.Envelope envelope, ImmutableArray<byte>? sharedKey, ILogger? logger)
+    internal static ReadOnlySpan<byte> DecryptEnvelopeInternal(Apps.Common.Envelope envelope, ReadOnlySpan<byte> sharedKey, ILogger? logger)
     {
-        if (sharedKey == null)
+        if (sharedKey.IsEmpty)
         {
             // Loopback
             return envelope.Ciphertext;
@@ -292,7 +292,7 @@ internal static class CryptoUtils
 
         try
         {
-            using ChaCha20Poly1305 cha = new(sharedKey.Value.AsSpan());
+            using ChaCha20Poly1305 cha = new(sharedKey);
             cha.Decrypt(
                 envelope.Nonce
                 , envelope.Ciphertext

@@ -77,7 +77,7 @@ public class FserveApp : IServerApp
                     }
 
                     var frame = any.Unpack<ClientFrame>();
-                    var innerMessage = FrameUtils.UnwrapFrame(appContext, frame, [.. cc.SessionSharedKey]);
+                    var innerMessage = FrameUtils.UnwrapFrame(appContext, frame, cc.SessionSharedKey.AsSpan());
                     if (innerMessage is AuthUserBegin aub)
                         return await HandleAuthUserBegin(requestContext, aub, cancellationToken);
                     else if (innerMessage is ListRequest lr)
@@ -111,7 +111,7 @@ public class FserveApp : IServerApp
                     }
 
                     var frame = any.Unpack<ServerFrame>();
-                    var innerMessage = FrameUtils.UnwrapFrame(appContext, frame, [.. fileClientApp.SessionSharedKey]);
+                    var innerMessage = FrameUtils.UnwrapFrame(appContext, frame, fileClientApp.SessionSharedKey.Value.AsSpan());
 
                     if (innerMessage is AuthChannelResponse acr)
                         return await fileClientApp.HandleAuthChannelResponse(requestContext, acr, cancellationToken);
@@ -176,7 +176,7 @@ public class FserveApp : IServerApp
             ClientConnections.Remove(cacheKey, out _);
         }
 
-        var (encapsulatedKey, sessionSharedKey) = appContext.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey([.. acb.SessionPubKey.ToByteArray()], appContext.Logger);
+        var (encapsulatedKey, sessionSharedKey) = appContext.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(acb.SessionPubKey.Span, appContext.Logger);
 
         var cc = new ClientConnection(sessionSharedKey);
         if (!ClientConnections.TryAdd(cacheKey, cc))

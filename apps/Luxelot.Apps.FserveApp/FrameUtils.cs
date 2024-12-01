@@ -71,7 +71,7 @@ internal static class FrameUtils
         };
     }
 
-    internal static IMessage UnwrapFrame(IAppContext appContext, ClientFrame frame, ImmutableArray<byte> sessionKey)
+    internal static IMessage UnwrapFrame(IAppContext appContext, ClientFrame frame, ReadOnlySpan<byte> sessionKey)
     {
         // Marshal into an envelope to use shared method in IAppContext
         var envelope = new Envelope
@@ -96,7 +96,7 @@ internal static class FrameUtils
         };
     }
 
-    internal static IMessage UnwrapFrame(IAppContext appContext, ServerFrame frame, ImmutableArray<byte> sessionKey)
+    internal static IMessage UnwrapFrame(IAppContext appContext, ServerFrame frame, ReadOnlySpan<byte> sessionKey)
     {
         // Marshal into an envelope to use shared method in IAppContext
         var envelope = new Envelope

@@ -4,8 +4,6 @@ namespace Luxelot.Apps.Common;
 
 public static class DisplayUtils
 {
-    public static string BytesToHex(ReadOnlySpan<byte> bytes) => Convert.ToHexString(bytes);
-
     public static byte[] HexToBytes(string hex)
     {
         try

@@ -155,7 +155,7 @@ internal class Peer : IDisposable
         ReadOnlySpan<byte> envelope_plain_text;
         try
         {
-            envelope_plain_text = CryptoUtils.DecryptEnvelopeInternal(envelope, SessionSharedKey, nodeContext.Logger);
+            envelope_plain_text = CryptoUtils.DecryptEnvelopeInternal(envelope, SessionSharedKey == null ? [] : SessionSharedKey.Value.AsSpan(), nodeContext.Logger);
         }
         catch
         {
@@ -415,7 +415,7 @@ internal class Peer : IDisposable
             Client?.Close();
             return false;
         }
-        var (encapsulatedKey, sessionSharedKey) = CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey([.. syn.SessionPubKey.ToByteArray()], nodeContext.Logger);
+        var (encapsulatedKey, sessionSharedKey) = CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(syn.SessionPubKey.Span, nodeContext.Logger);
         SessionSharedKey = sessionSharedKey;
 
         // This peer's identity key was received in Syn.
@@ -518,7 +518,7 @@ internal class Peer : IDisposable
             throw new InvalidOperationException("Shared key already computed!");
         if (SessionPrivateKey == null)
             throw new InvalidOperationException("Private key not set!");
-        SessionSharedKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, [.. ack.CipherText.ToByteArray()], nodeContext.Logger);
+        SessionSharedKey = CryptoUtils.GenerateChrystalsKyberDecryptionKey(SessionPrivateKey.Value, ack.CipherText.Span, nodeContext.Logger);
         if (IdentityPublicKey != null)
             throw new InvalidOperationException($"Peer {Name} should have an empty identity public key field at Ack time!");
 

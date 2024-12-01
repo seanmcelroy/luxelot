@@ -38,7 +38,7 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
 
         var bucketNumber = dhtHeight;
         var ba = new BitArray(distance);
-        if (ba.Length != Constants.TREE_HEIGHT)
+        if (ba.Length != dhtHeight)
             throw new ArgumentOutOfRangeException(nameof(distance), $"Distance must be as many bits ({ba.Length}) as the tree height ({dhtHeight}).");
 
         for (int i = ba.Length - 1; i >= 0; i--)
@@ -86,7 +86,7 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
 
         if (nodeThumbprint.Length != Apps.Common.Constants.THUMBPRINT_LEN)
             throw new ArgumentOutOfRangeException(nameof(nodeThumbprint), $"Thumbprint should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {nodeThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
-        if (key.Length != Apps.Common.Constants.THUMBPRINT_LEN) // Needs to be true for distance metric
+        if (key.Length != Common.Constants.THUMBPRINT_LEN) // Needs to be true for distance metric
             throw new ArgumentOutOfRangeException(nameof(key), $"Key should be {Apps.Common.Constants.THUMBPRINT_LEN} bytes long but was {nodeThumbprint.Length} bytes.  Did you pass in a full pub key instead of a thumbprint?");
 
         if (nodeThumbprint.IsDefault)

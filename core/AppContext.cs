@@ -103,9 +103,9 @@ internal class AppContext : IAppContext
 
     public (ImmutableArray<byte> publicKeyBytes, ImmutableArray<byte> privateKeyBytes) GenerateKyberKeyPair() => CryptoUtils.GenerateKyberKeyPair(Logger);
 
-    public (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ImmutableArray<byte> publicKey, ILogger? logger) => CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(publicKey, logger);
+    public (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ReadOnlySpan<byte> publicKey, ILogger? logger) => CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(publicKey, logger);
 
-    public ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ImmutableArray<byte> encapsulatedKey, ILogger? logger) =>
+    public ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ReadOnlySpan<byte> encapsulatedKey, ILogger? logger) =>
         CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey, logger);
 
     public bool TryRegisterSingleton<T>(Func<T> valueFactory) where T : class
@@ -147,7 +147,7 @@ internal class AppContext : IAppContext
         };
     }
 
-    public ReadOnlySpan<byte> DecryptEnvelope(Apps.Common.Envelope envelope, ImmutableArray<byte> sessionSharedKey, ILogger? logger) => CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
+    public ReadOnlySpan<byte> DecryptEnvelope(Apps.Common.Envelope envelope, ReadOnlySpan<byte> sessionSharedKey, ILogger? logger) => CryptoUtils.DecryptEnvelopeInternal(envelope, sessionSharedKey, logger);
 
     public async Task<bool> EnterAppInteractiveMode(string clientAppName, CancellationToken cancellationToken) => await Node.EnterAppInteractiveMode(clientAppName, cancellationToken);
 

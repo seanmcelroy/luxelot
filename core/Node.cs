@@ -921,7 +921,7 @@ internal class Node : INode
                         if (!success)
                             await context.WriteLineToUserAsync($"ERROR: {(ActiveClientApp == null ? string.Empty : ActiveClientApp.InteractiveCommand + " ")}{appCommand.InteractiveCommand}: {errorMessage}", cancellationToken);
                         else if (!string.IsNullOrWhiteSpace(errorMessage))
-                            await context.WriteLineToUserAsync(errorMessage, cancellationToken);
+                            await context.WriteLineToUserAsync(errorMessage, cancellationToken); // error might be a status message
                         return;
                     }
                 }
