@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using Luxelot.Apps.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Luxelot.Apps.DhtApp;
@@ -18,68 +19,6 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
 
     public bool IsReadOnly => false;
 
-    private static int MapDistanceToBucketNumber(uint distance, int dhtHeight = Constants.TREE_HEIGHT)
-    {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(distance, dhtHeight * (uint)8);
-
-        var distanceBytes = BitConverter.GetBytes(distance);
-        var paddedDistance = new byte[dhtHeight / 8];
-        Buffer.BlockCopy(distanceBytes, 0, paddedDistance, 0, paddedDistance.Length);
-        return MapDistanceToBucketNumber(paddedDistance, dhtHeight);
-    }
-
-    public static int MapDistanceToBucketNumber(byte[] distance, int dhtHeight = Constants.TREE_HEIGHT)
-    {
-        ArgumentNullException.ThrowIfNull(distance);
-
-        // Distance is the XORed difference of two keys, computed by the caller.
-        // Higher distances should point to buckets that account for more keyspace
-        //   so that more information is retained for 'closer' items.
-
-        var bucketNumber = dhtHeight;
-        var ba = new BitArray(distance);
-        if (ba.Length != dhtHeight)
-            throw new ArgumentOutOfRangeException(nameof(distance), $"Distance must be as many bits ({ba.Length}) as the tree height ({dhtHeight}).");
-
-        for (int i = ba.Length - 1; i >= 0; i--)
-        {
-            if (ba[i])
-                return bucketNumber;
-            bucketNumber--;
-        }
-        return 0;
-    }
-
-    public static byte[] GetDistanceMetric(ReadOnlySpan<byte> key1, ReadOnlySpan<byte> key2)
-    {
-        var k1c = key1.Length;
-        var k2c = key2.Length;
-
-        if (k1c != k2c)
-            throw new ArgumentException($"Both keys must be of the same length, but key1 len was {k1c} and key2 len was {k2c}", nameof(key1));
-
-        var result = new byte[k1c];
-        for (int i = 0; i < k1c; i++)
-            result[i] = (byte)(key1[i] ^ key2[i]);
-        return result;
-    }
-
-    public static byte[] GetDistanceMetric(ImmutableArray<byte> key1, ImmutableArray<byte> key2)
-    {
-        if (key1.IsDefault)
-            throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(key1));
-        if (key2.IsDefault)
-            throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(key2));
-
-        if (key1.Length != key2.Length)
-            throw new ArgumentException($"Both keys must be of the same length, but key1 len was {key1.Length} and key2 len was {key2.Length}", nameof(key1));
-
-        var result = new byte[key1.Length];
-        for (int i = 0; i < key1.Length; i++)
-            result[i] = (byte)(key1[i] ^ key2[i]);
-        return result;
-    }
-
     public bool InsertBucketValue(ImmutableArray<byte> nodeThumbprint, ImmutableArray<byte> key, IBucketEntryValue value, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(value);
@@ -94,8 +33,8 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
         if (key.IsDefault)
             throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(key));
 
-        var distance = GetDistanceMetric([.. nodeThumbprint], key);
-        var kbucket = MapDistanceToBucketNumber(distance);
+        var distance = ByteUtils.GetDistanceMetric([.. nodeThumbprint], key);
+        var kbucket = ByteUtils.MapDistanceToBucketNumber(distance, Constants.TREE_HEIGHT );
 
         var bucket = Buckets[kbucket - 1];
         if (bucket == default)
@@ -117,15 +56,13 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
         return false;
     }
 
-    public bool TryGetValue(ImmutableArray<byte> nodeThumbprint, ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value)
+    public bool TryGetValue(ImmutableArray<byte> key, [NotNullWhen(true)] out IBucketEntryValue? value)
     {
-        if (nodeThumbprint.IsDefault)
-            throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(nodeThumbprint));
         if (key.IsDefault)
             throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(key));
 
-        var distance = GetDistanceMetric([.. nodeThumbprint], key);
-        var kbucket = MapDistanceToBucketNumber(distance);
+        var distance = ByteUtils.GetDistanceMetric(NodeIdentitykeyPublicThumbprint, key);
+        var kbucket = ByteUtils.MapDistanceToBucketNumber(distance, Constants.TREE_HEIGHT);
         if (Buckets[kbucket - 1] == default)
         {
             value = null;
@@ -191,7 +128,7 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
         ((IEnumerable<BucketEntry>)this).Select(be => new
         {
             Entry = be,
-            Distance = GetDistanceMetric(be.Key.AsSpan(), target.Span)
+            Distance = ByteUtils.GetDistanceMetric(be.Key.AsSpan(), target.Span)
 
         })
         .OrderBy(x => x.Distance)

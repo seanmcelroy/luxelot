@@ -598,7 +598,7 @@ public class FileClientApp : IClientApp
 
             if (fileOk)
             {
-                await appContext.SendConsoleMessage($"Downloaded file to '{destinationPath}'", cancellationToken);
+                await appContext.SendConsoleMessage($"Downloaded file to '{destinationPath}'\r\n", cancellationToken);
                 return true;
             }
         }

@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using System.Text;
 using Luxelot.Apps.Common;
 using Luxelot.Apps.DhtApp.Messages;
 using Microsoft.Extensions.Logging;
@@ -43,7 +45,33 @@ public class FindCommand : IConsoleCommand
             return (false, "Internal error.");
         }
 
+        ImmutableArray<byte> key = [.. DisplayUtils.HexToBytes(words[2])];
+        if (key == null)
+        {
+            return (false, $"Unable to parse '{words[2]}' as hexadecimal bytes.");
+        }
+
+        if (key.Length * 8 != Constants.BUCKET_ENTRY_KEY_BIT_LENGTH)
+        {
+            return (false, $"Hash is not the correct bit length of {Constants.BUCKET_ENTRY_KEY_BIT_LENGTH} bits ({Constants.BUCKET_ENTRY_KEY_BIT_LENGTH / 8} bytes).  Hash provided is {key.Length} bytes.");
+        }
+
+        // First, search my own table
         var dht = dhtServerApp.Tables[dhtTableType];
+        var distance = ByteUtils.GetDistanceMetric(key, appContext.IdentityKeyPublicThumbprint);
+        var bucket = ByteUtils.MapDistanceToBucketNumber(distance, Constants.TREE_HEIGHT);
+
+        if (!dht.TryGetValue(key, out IBucketEntryValue? value))
+        {
+            await appContext.SendConsoleMessage($"No local entry for key (searched bucket {bucket})..", cancellationToken);
+        }
+        else
+        {
+            return (true, $"Value found for key '{Convert.ToHexString([.. key])}': {value}");
+            throw new NotImplementedException();
+        }
+
+        // Next, reach out to the network.
 
         throw new NotImplementedException();
         return (true, null);

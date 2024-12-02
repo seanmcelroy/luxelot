@@ -118,13 +118,26 @@ public class DhtClientApp : IClientApp
 
                 if (appCommand != null)
                 {
-                    var (success, errorMessage) = await appCommand.Invoke(words, cancellationToken);
-                    return new HandleUserInputResult
+                    try
                     {
-                        Success = success,
-                        ErrorMessage = errorMessage,
-                        Command = appCommand
-                    };
+                        var (success, errorMessage) = await appCommand.Invoke(words, cancellationToken);
+                        return new HandleUserInputResult
+                        {
+                            Success = success,
+                            ErrorMessage = errorMessage,
+                            Command = appCommand
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        appContext.Logger?.LogError(ex, "Error when executing command: {Message}", ex.Message);
+                        return new HandleUserInputResult
+                        {
+                            Success = false,
+                            ErrorMessage = ex.ToString(),
+                            Command = appCommand
+                        };
+                    }
                 }
 
                 return new HandleUserInputResult

@@ -725,7 +725,12 @@ internal class Node : INode
                 default:
                     var result = await ActiveClientApp.HandleUserInput(input, cancellationToken);
                     if (result.Success)
+                    {
+                        if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+                            await context.WriteLineToUserAsync(result.ErrorMessage, cancellationToken);
                         return;
+                    }
+                    
                     if (string.IsNullOrWhiteSpace(result.ErrorMessage))
                     {
                         if (result.Command != null)
@@ -753,7 +758,7 @@ internal class Node : INode
                     sb.AppendLine()
                         .AppendLine("COMMAND LIST")
                         .AppendLine("Built-In Commands:");
-                    var built_in_cmds = new string[] { "dht", "disconnect", "connect", "node", "peers", "quit", "shutdown", "version" };
+                    var built_in_cmds = new string[] { "dht", "disconnect", "connect", "node", "peer", "peers", "quit", "shutdown", "version" };
                     sb.AppendLine(built_in_cmds
                         .Order()
                         .Aggregate((c, n) => $"{c}{Environment.NewLine}{n}"));
@@ -842,10 +847,51 @@ internal class Node : INode
                 await context.WriteLineToUserAsync($"ID Thumbprint: {Convert.ToHexString(IdentityKeyPublicThumbprint.AsSpan())}", cancellationToken);
                 return;
 
+            case "peer":
+                {
+                    if (words.Length != 2)
+                    {
+                        await context.WriteLineToUserAsync($"Command requires one argument, the peer short name to examine.", cancellationToken);
+                        return;
+                    }
+
+                    var peer = Peers.Values.FirstOrDefault(p => string.Compare(p.ShortName, words[1], StringComparison.OrdinalIgnoreCase) == 0);
+                    if (peer == null)
+                    {
+                        await context.WriteLineToUserAsync($"No peer found with name '{words[1]}'.", cancellationToken);
+                        return;
+                    }
+
+                    var sb = new StringBuilder();
+                    sb.AppendLine("\r\nPEER INFO");
+                    sb.AppendLine($"Short name    : {peer.ShortName}");
+                    sb.AppendLine($"Thumbprint    : {(peer.IdentityPublicKeyThumbprint == null ? "(NULL)" : Convert.ToHexString(peer.IdentityPublicKeyThumbprint.Value.AsSpan()))}");
+                    sb.AppendLine($"Endpoint      : {(peer.RemoteEndPoint == null ? "(NULL)" : peer.RemoteEndPoint.ToString())}");
+
+                    sb.AppendLine("\r\n[Network]");
+                    sb.AppendLine($"State         : {System.Enum.GetName(peer.State)}");
+                    var rel = DateUtils.GetRelativeTimeString(DateTime.UtcNow - peer.LastActivity);
+                    sb.AppendLine($"Last Activity : {peer.LastActivity} ({rel})");
+                    sb.AppendLine($"Bytes sent    : {peer.BytesSent:n0} ({DisplayUtils.ConvertByteCountToRelativeSuffix(peer.BytesSent)})");
+                    sb.AppendLine($"Bytes received: {peer.BytesReceived:n0} ({DisplayUtils.ConvertByteCountToRelativeSuffix(peer.BytesReceived)})");
+                    sb.AppendLine($"My observed IP: {peer.ClientPerceivedLocalAddress}");
+
+                    sb.AppendLine("\r\n[DHT]");
+                    var distance = peer.IdentityPublicKeyThumbprint == null ? null : ByteUtils.GetDistanceMetric(IdentityKeyPublicThumbprint, peer.IdentityPublicKeyThumbprint.Value);
+                    sb.AppendLine($"Distance      : {(distance == null ? "(NULL)" : Convert.ToHexString(distance.AsSpan()))}");
+                    var kbucket = distance == null ? default(int?) : ByteUtils.MapDistanceToBucketNumber(distance, 256);
+                    sb.AppendLine($"K-Bucket      : {(kbucket == null ? "(NULL)" : kbucket.Value)}");
+
+                    sb.AppendLine().AppendLine("END OF PEER INFO").AppendLine();
+
+                    await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
+                    break;
+                }
+
             case "peers":
                 {
                     var sb = new StringBuilder();
-                    sb.AppendLine("\r\nPeer List");
+                    sb.AppendLine("\r\nPEER LIST");
                     var peers = Peers.Values;
                     if (peers.Count > 0)
                     {
@@ -859,7 +905,7 @@ internal class Node : INode
                             sb.AppendLine($"{peer.ShortName.PadRight("PeerShortName".Length)} {peer.State.ToString().PadRight(state_len)} {(peer.RemoteEndPoint == null ? string.Empty.PadRight("RemoteEndPoint".Length) : peer.RemoteEndPoint.ToString()!).PadRight(rep_len)} {peer.BytesReceived.ToString().PadRight(recv_len)} {peer.BytesSent.ToString().PadRight(sent_len)} {(peer.IdentityPublicKeyThumbprint == null ? "(NULL)" : Convert.ToHexString(peer.IdentityPublicKeyThumbprint.Value.AsSpan()))}");
                         }
                     }
-                    sb.AppendLine("End of Peer List");
+                    sb.AppendLine().AppendLine("END OF PEER LIST").AppendLine();
                     await context.WriteLineToUserAsync(sb.ToString(), cancellationToken);
                     break;
                 }
@@ -872,6 +918,7 @@ internal class Node : INode
                 return;
 
             case "shutdown":
+                Logger?.LogCritical("Console user issued shutdown command.");
                 Environment.Exit(0);
                 return;
 
