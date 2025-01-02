@@ -18,7 +18,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Generators;
-using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Crypto.Signers;
 using static Luxelot.Apps.Common.RegexUtils;
 
 namespace Luxelot;
@@ -72,10 +73,10 @@ internal class Node : INode
         ArgumentNullException.ThrowIfNull(loggerFactory);
         ArgumentNullException.ThrowIfNull(acp);
 
-        var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)acp.Public).GetEncoded();
+        var identityKeysPublicBytes = ((MLDsaPublicKeyParameters)acp.Public).GetEncoded();
         IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
         IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
-        IdentityKeyPrivateBytes = [.. ((DilithiumPrivateKeyParameters)acp.Private).GetEncoded()];
+        IdentityKeyPrivateBytes = [.. ((MLDsaPrivateKeyParameters)acp.Private).GetEncoded()];
         Name = Convert.ToHexString(IdentityKeyPublicThumbprint.AsSpan());
         ShortName = $"{Name[..8]}...";
         Logger = loggerFactory.CreateLogger($"Node {ShortName}");
@@ -93,10 +94,10 @@ internal class Node : INode
         var loggerFactory = (ILoggerFactory?)host.Services.GetService(typeof(ILoggerFactory));
 
         var acp = CryptoUtils.GenerateDilithiumKeyPair();
-        var identityKeysPublicBytes = ((DilithiumPublicKeyParameters)acp.Public).GetEncoded();
+        var identityKeysPublicBytes = ((MLDsaPublicKeyParameters)acp.Public).GetEncoded();
         IdentityKeyPublicBytes = [.. identityKeysPublicBytes];
         IdentityKeyPublicThumbprint = [.. SHA256.HashData(identityKeysPublicBytes)];
-        IdentityKeyPrivateBytes = [.. ((DilithiumPrivateKeyParameters)acp.Private).GetEncoded()];
+        IdentityKeyPrivateBytes = [.. ((MLDsaPrivateKeyParameters)acp.Private).GetEncoded()];
         Name = Convert.ToHexString(IdentityKeyPublicThumbprint.AsSpan());
         if (string.IsNullOrWhiteSpace(shortName))
         {
@@ -166,8 +167,8 @@ internal class Node : INode
 
         var kc = System.Text.Json.JsonSerializer.Deserialize<KeyContainer>(json) ?? throw new InvalidOperationException("Unable to deserialize key container");
 
-        var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, Convert.FromBase64String(kc.PublicKeyBase64));
-        var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, Convert.FromBase64String(kc.PrivateKeyBase64), pub);
+        var pub = MLDsaPublicKeyParameters.FromEncoding(MLDsaParameters.ml_dsa_87, Convert.FromBase64String(kc.PublicKeyBase64));
+        var pri = MLDsaPrivateKeyParameters.FromEncoding(MLDsaParameters.ml_dsa_87, Convert.FromBase64String(kc.PrivateKeyBase64));
 
         var identityKeys = new AsymmetricCipherKeyPair(pub, pri);
 
@@ -1025,13 +1026,14 @@ internal class Node : INode
             var forwardId = BitConverter.ToUInt64(forwardIdBytes);
             if (ForwardIds.TryAdd(forwardId, false))
             {
-                var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPublicBytes]);
-                var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPrivateBytes], pub);
+                var pub = MLDsaPublicKeyParameters.FromEncoding(MLDsaParameters.ml_dsa_87, [.. IdentityKeyPublicBytes]);
+                var pri = MLDsaPrivateKeyParameters.FromEncoding(MLDsaParameters.ml_dsa_87, [.. IdentityKeyPrivateBytes]);
 
-                var nodeSigner = new DilithiumSigner();
+                var nodeSigner = new MLDsaSigner(MLDsaParameters.ml_dsa_87, true);
                 nodeSigner.Init(true, pri);
                 var packed_payload = Any.Pack(innerPayload);
-                var signature = nodeSigner.GenerateSignature(packed_payload.ToByteArray());
+                nodeSigner.BlockUpdate(packed_payload.ToByteArray());
+                var signature = nodeSigner.GenerateSignature();
 
                 return new ForwardedMessage
                 {
@@ -1071,12 +1073,14 @@ internal class Node : INode
         else
         {
             src = ByteString.CopyFrom(IdentityKeyPublicThumbprint.AsSpan());
-            var pub = new DilithiumPublicKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPublicBytes]);
-            var pri = new DilithiumPrivateKeyParameters(DilithiumParameters.Dilithium5, [.. IdentityKeyPrivateBytes], pub);
 
-            var nodeSigner = new DilithiumSigner();
+            var pub = MLDsaPublicKeyParameters.FromEncoding(MLDsaParameters.ml_dsa_87, [.. IdentityKeyPublicBytes]);
+            var pri = MLDsaPrivateKeyParameters.FromEncoding(MLDsaParameters.ml_dsa_87, [.. IdentityKeyPrivateBytes]);
+
+            var nodeSigner = new MLDsaSigner(MLDsaParameters.ml_dsa_87, true);
             nodeSigner.Init(true, pri);
-            signature = nodeSigner.GenerateSignature(packed_payload.ToByteArray());
+            nodeSigner.BlockUpdate(packed_payload.ToByteArray());
+            signature = nodeSigner.GenerateSignature();
         }
 
         var dm = new DirectedMessage

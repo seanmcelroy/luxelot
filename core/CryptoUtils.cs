@@ -4,12 +4,11 @@ using System.Text;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
 using Org.BouncyCastle.Crypto.Kems;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Generators;
-using Luxelot.Apps.Common;
+using Org.BouncyCastle.Crypto.Signers;
 
 namespace Luxelot;
 
@@ -18,18 +17,18 @@ internal static class CryptoUtils
     private static readonly Mutex mutex = new();
     private static readonly SecureRandom SecureRandom = new();
 
-    // Kyber - Super helpful: https://stackoverflow.com/questions/75240825/implementing-crystals-kyber-using-bouncycastle-java
-    // Dilithium - Super helpful: https://asecuritysite.com/bouncy/bc_dil
+    // ML-KEM (Kyber) - Super helpful: https://stackoverflow.com/questions/75240825/implementing-crystals-kyber-using-bouncycastle-java
+    // ML-DSA (Dilithium) - Super helpful: https://asecuritysite.com/bouncy/bc_dil
 
     internal static AsymmetricCipherKeyPair GenerateDilithiumKeyPair()
     {
         // These keys are used for NODE IDENTITY.  The node can sign envelopes forwarded
         // by other nodes around the network.
 
-        DilithiumKeyGenerationParameters keyGenParameters = new(SecureRandom, DilithiumParameters.Dilithium5);
-        DilithiumKeyPairGenerator keyPairGen = new();
-        keyPairGen.Init(keyGenParameters);
-        var keyPair = keyPairGen.GenerateKeyPair();
+        MLDsaKeyGenerationParameters parameters = new(SecureRandom, MLDsaParameters.ml_dsa_87);
+        MLDsaKeyPairGenerator gen = new();
+        gen.Init(parameters);
+        var keyPair = gen.GenerateKeyPair();
         return keyPair;
     }
 
@@ -190,7 +189,8 @@ internal static class CryptoUtils
         MLKemDecapsulator dec = new(MLKemParameters.ml_kem_1024);
         dec.Init(privateKey);
 
-        if (encapsulatedKey.Length != dec.EncapsulationLength) {
+        if (encapsulatedKey.Length != dec.EncapsulationLength)
+        {
             throw new ArgumentException("", nameof(encapsulatedKey));
         }
 
@@ -322,12 +322,12 @@ internal static class CryptoUtils
 
     internal static bool ValidateDilithiumSignature(ImmutableArray<byte> publicKey, byte[] message, byte[] signature)
     {
-        var sourceVerify = new DilithiumSigner();
-        DilithiumPublicKeyParameters parms = new(DilithiumParameters.Dilithium5, [.. publicKey]);
-        sourceVerify.Init(false, parms);
-        return sourceVerify.VerifySignature(message, signature);
+        var verifier = new MLDsaSigner(MLDsaParameters.ml_dsa_87, true);
+        var parms = MLDsaPublicKeyParameters.FromEncoding(MLDsaParameters.ml_dsa_87, [.. publicKey]);
+        verifier.Init(false, parms);
+        verifier.BlockUpdate(message);
+        return verifier.VerifySignature(signature);
     }
-
 
     private const string DEFAULT_CHARACTER_SET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     internal static string ConvertToBase62(this byte[] arr)
