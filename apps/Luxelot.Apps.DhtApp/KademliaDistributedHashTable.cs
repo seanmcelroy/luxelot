@@ -34,7 +34,7 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
             throw new ArgumentException("Cannot pass a defualt instance in for this array", nameof(key));
 
         var distance = ByteUtils.GetDistanceMetric([.. nodeThumbprint], key);
-        var kbucket = ByteUtils.MapDistanceToBucketNumber(distance, Constants.TREE_HEIGHT );
+        var kbucket = ByteUtils.MapDistanceToBucketNumber(distance, Constants.TREE_HEIGHT);
 
         var bucket = Buckets[kbucket - 1];
         if (bucket == default)
@@ -124,14 +124,46 @@ public class KademliaDistributedHashTable(ImmutableArray<byte> nodeIdentitykeyPu
 
     IEnumerator<BucketEntry> IEnumerable<BucketEntry>.GetEnumerator() => Buckets.Where(b => b != default).SelectMany(b => b.Entries.Where(be => be != default)).GetEnumerator();
 
-    public IEnumerable<BucketEntry> FindClosest(Memory<byte> target, int count) =>
-        ((IEnumerable<BucketEntry>)this).Select(be => new
+    /// <summary>
+    /// Finds the closest <paramref name="count"/> entries in the DHT to the specified <paramref name="target"/>
+    /// </summary>
+    /// <param name="target">The key to target when finding 'close' nodes</param>
+    /// <param name="count">The maximum number of candidates to return</param>
+    /// <returns>Candidate bucket entries in ascending distance order</returns>
+    public IEnumerable<BucketEntry> FindClosest(ReadOnlySpan<byte> target, int count)
+    {
+        List<(BucketEntry entry, byte[] distance)> entries = [];
+        foreach (var be in (IEnumerable<BucketEntry>)this)
         {
-            Entry = be,
-            Distance = ByteUtils.GetDistanceMetric(be.Key.AsSpan(), target.Span)
+            var keySpan = be.Key.AsSpan();
+            var distance = ByteUtils.GetDistanceMetric(keySpan, target);
+            entries.Add((be, distance));
+        }
 
-        })
-        .OrderBy(x => x.Distance)
-        .Take(count)
-        .Select(x => x.Entry);
+        return entries
+            .OrderBy(x => x.distance)
+            .Take(count)
+            .Select(x => x.entry);
+    }
+
+    /// <summary>
+    /// Finds the closest <paramref name="count"/> entries in the DHT to the specified <paramref name="target"/>
+    /// </summary>
+    /// <param name="target">The key to target when finding 'close' nodes</param>
+    /// <param name="count">The maximum number of candidates to return</param>
+    /// <returns>Candidate bucket entries in ascending distance order</returns>
+    public IEnumerable<BucketEntry> FindClosest(ImmutableArray<byte> target, int count)
+    {
+        List<(BucketEntry entry, byte[] distance)> entries = [];
+        foreach (var be in (IEnumerable<BucketEntry>)this)
+        {
+            var distance = ByteUtils.GetDistanceMetric(be.Key, target);
+            entries.Add((be, distance));
+        }
+
+        return entries
+            .OrderBy(x => x.distance)
+            .Take(count)
+            .Select(x => x.entry);
+    }
 }

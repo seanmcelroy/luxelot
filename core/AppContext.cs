@@ -103,7 +103,7 @@ internal class AppContext : IAppContext
 
     public (ImmutableArray<byte> publicKeyBytes, ImmutableArray<byte> privateKeyBytes) GenerateKyberKeyPair() => CryptoUtils.GenerateKyberKeyPair(Logger);
 
-    public (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ReadOnlySpan<byte> publicKey, ILogger? logger) => CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(publicKey, logger);
+    public (ImmutableArray<byte> encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ReadOnlySpan<byte> publicKey, ILogger? logger) => CryptoUtils.ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(publicKey, logger);
 
     public ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ReadOnlySpan<byte> encapsulatedKey, ILogger? logger) =>
         CryptoUtils.GenerateChrystalsKyberDecryptionKey(privateKeyBytes, encapsulatedKey, logger);

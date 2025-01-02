@@ -73,6 +73,30 @@ public class FindCommand : IConsoleCommand
 
         // Next, reach out to the network.
 
+        // Find the closest peer address
+        var candidates = dht.FindClosest(key, Constants.ALPHA_CONCURRENT_REQUESTS); // TODO: This should be a global max, not a per-request max.  Need concurrent/interlocked tracking or request queueuing
+
+        var keySpan = key.AsSpan();
+        var v1 = BitConverter.ToUInt64(keySpan[..8]);
+        var v2 = BitConverter.ToUInt64(keySpan.Slice(8, 8));
+        var v3 = BitConverter.ToUInt64(keySpan.Slice(16, 8));
+        var v4 = BitConverter.ToUInt64(keySpan.Slice(24, 8));
+
+        List<Task> sendTasks = [];
+
+        foreach (var candidate in candidates) {
+            var ne = (NodeEntry)candidate.Value;
+            sendTasks.Add(appContext.SendMessage(ne.IdentityThumbprint, new DhtFindRequest {
+                TableType = DhtTableType.Node,
+                Value1 = v1,
+                Value2 = v2,
+                Value3 = v3,
+                Value4 = v4
+            }, cancellationToken ));
+        }
+        Task.WaitAll(sendTasks, cancellationToken);
+
+
         throw new NotImplementedException();
         return (true, null);
     }

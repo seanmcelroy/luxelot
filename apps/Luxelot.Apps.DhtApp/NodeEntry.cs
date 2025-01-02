@@ -7,9 +7,11 @@ namespace Luxelot.Apps.DhtApp;
 
 public record class NodeEntry : IBucketEntryValue
 {
-    public required IPEndPoint? RemoteEndpoint { get; init; }
+    public required IPEndPoint RemoteEndpoint { get; init; }
 
-    public required ImmutableArray<byte>? IdentityPublicKey { get; init; }
+    public required ImmutableArray<byte> IdentityPublicKey { get; init; }
+
+    public required ImmutableArray<byte> IdentityThumbprint { get; init; }
 
     [JsonIgnore]
     public ulong Length => (ulong)ToByteArray().Length;
@@ -21,5 +23,5 @@ public record class NodeEntry : IBucketEntryValue
         return [.. jsonBytes];
     }
 
-    public override string ToString() => $"{(IdentityPublicKey == null ? "(NO PUB KEY)" : Convert.ToHexString(IdentityPublicKey.Value.AsSpan())[..8])}... {RemoteEndpoint}";
+    public override string ToString() => $"{(IdentityPublicKey == null ? "(NO PUB KEY)" : Convert.ToHexString(IdentityPublicKey.AsSpan())[..8])}... {RemoteEndpoint}";
 }

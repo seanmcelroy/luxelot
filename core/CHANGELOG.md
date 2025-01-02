@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7 - 2025-01-01
+
+### Changed
+
+- Updated from BouncyCastle for .NET 2.4.0 to 2.5.0, which removed Kyber in favor of generalized ML-KEM.
+
 ## 1.6 - 2024-11-28
 
 ### Changed

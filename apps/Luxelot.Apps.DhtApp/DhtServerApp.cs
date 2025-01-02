@@ -65,7 +65,11 @@ public class DhtServerApp : IServerApp
             Tables[DhtTableType.Node].InsertBucketValue(
                 appContext.IdentityKeyPublicThumbprint, // Used to calculate distance metric
                 args.Thumbprint,
-                new NodeEntry { RemoteEndpoint = args.RemoteEndpoint, IdentityPublicKey = args.PublicKey },
+                new NodeEntry { 
+                    RemoteEndpoint = args.RemoteEndpoint, 
+                    IdentityPublicKey = args.PublicKey,
+                    IdentityThumbprint = args.Thumbprint
+                },
                 appContext.Logger);
         };
     }

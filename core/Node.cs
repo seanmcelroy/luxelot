@@ -290,6 +290,7 @@ internal class Node : INode
                     // It better be alive.
                     switch (t.Value.Status)
                     {
+                        case TaskStatus.WaitingForChildrenToComplete:
                         case TaskStatus.WaitingForActivation:
                         case TaskStatus.WaitingToRun:
                         case TaskStatus.Running:
@@ -313,7 +314,9 @@ internal class Node : INode
                 // Is it complete?
                 switch (t.Value.Status)
                 {
+                    case TaskStatus.WaitingForChildrenToComplete:
                     case TaskStatus.WaitingForActivation:
+                    case TaskStatus.WaitingToRun:
                     case TaskStatus.Running:
                         {
                             // Fine.
@@ -730,7 +733,7 @@ internal class Node : INode
                             await context.WriteLineToUserAsync(result.ErrorMessage, cancellationToken);
                         return;
                     }
-                    
+
                     if (string.IsNullOrWhiteSpace(result.ErrorMessage))
                     {
                         if (result.Command != null)

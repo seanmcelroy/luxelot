@@ -5,8 +5,11 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Pqc.Crypto.Crystals.Dilithium;
-using Org.BouncyCastle.Pqc.Crypto.Crystals.Kyber;
+using Org.BouncyCastle.Crypto.Kems;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Crypto.Generators;
+using Luxelot.Apps.Common;
 
 namespace Luxelot;
 
@@ -101,8 +104,8 @@ internal static class CryptoUtils
 
         try
         {
-            KyberKeyGenerationParameters kyber_generation_parameters = new(SecureRandom, KyberParameters.kyber1024);
-            KyberKeyPairGenerator keypair_generator = new();
+            MLKemKeyGenerationParameters kyber_generation_parameters = new(SecureRandom, MLKemParameters.ml_kem_1024);
+            MLKemKeyPairGenerator keypair_generator = new();
             keypair_generator.Init(kyber_generation_parameters);
             key_pair = keypair_generator.GenerateKeyPair();
         }
@@ -118,7 +121,7 @@ internal static class CryptoUtils
     {
         ArgumentNullException.ThrowIfNull(keyPair);
 
-        var publicKey = (KyberPublicKeyParameters)keyPair.Public;
+        var publicKey = (MLKemPublicKeyParameters)keyPair.Public;
         var publicKeyBytes = publicKey.GetEncoded();
         return publicKeyBytes;
     }
@@ -127,28 +130,23 @@ internal static class CryptoUtils
     {
         ArgumentNullException.ThrowIfNull(keyPair);
 
-        var privateKey = (KyberPrivateKeyParameters)keyPair.Private;
+        var privateKey = (MLKemPrivateKeyParameters)keyPair.Private;
         var privateKeyBytes = privateKey.GetEncoded();
         return privateKeyBytes;
     }
 
-    internal static (byte[] encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ReadOnlySpan<byte> publicKey, ILogger? logger)
+    internal static (ImmutableArray<byte> encapsulatedKey, ImmutableArray<byte> sessionSharedKey) ComputeSharedKeyAndEncapsulatedKeyFromKyberPublicKey(ReadOnlySpan<byte> publicKeyBytes, ILogger? logger)
     {
-        var secretKeyWithEncapsulationSender = GenerateChrystalsKyberEncryptionKey(publicKey, logger);
+        var publicKey = MLKemPublicKeyParameters.FromEncoding(MLKemParameters.ml_kem_1024, [.. publicKeyBytes]);
 
-        // Shared Key
-        var encryptionKey = secretKeyWithEncapsulationSender.GetSecret();
-        var sessionSharedKey = encryptionKey.ToImmutableArray();
+        MLKemEncapsulator enc = new(MLKemParameters.ml_kem_1024);
+        enc.Init(publicKey);
 
-        // Encapsulated key (cipher text)
-        var encapsulatedKey = secretKeyWithEncapsulationSender.GetEncapsulation();
-        return (encapsulatedKey, sessionSharedKey);
-    }
+        var cipherTextBytes = new byte[enc.EncapsulationLength];
+        var cipherTextSpan = cipherTextBytes.AsSpan();
 
-    private static ISecretWithEncapsulation GenerateChrystalsKyberEncryptionKey(ReadOnlySpan<byte> publicKeyBytes, ILogger? logger)
-    {
-        KyberPublicKeyParameters publicKey = new(KyberParameters.kyber1024, [.. publicKeyBytes]);
-        ISecretWithEncapsulation secret_with_encapsulation;
+        var sharedSecretBytes = new byte[enc.SecretLength];
+        var sharedSecretSpan = sharedSecretBytes.AsSpan();
 
         // Exponential backoff
         const int baseBackoff = 100;
@@ -168,28 +166,36 @@ internal static class CryptoUtils
 
         try
         {
-            KyberKemGenerator kem_generator = new(SecureRandom);
-            secret_with_encapsulation = kem_generator.GenerateEncapsulated(publicKey);
+            // Encapsulate
+            enc.Encapsulate(cipherTextSpan, sharedSecretSpan);
         }
         finally
         {
             mutex.ReleaseMutex(); // AbsorbBits in GenerateKeyPair() cannot handle threading.
         }
 
-        return secret_with_encapsulation;
+        return (cipherTextBytes.ToImmutableArray(), sharedSecretBytes.ToImmutableArray());
     }
 
     internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(ImmutableArray<byte> privateKeyBytes, ReadOnlySpan<byte> encapsulatedKey, ILogger? logger)
     {
-        var privateKey = new KyberPrivateKeyParameters(KyberParameters.kyber1024, [.. privateKeyBytes]);
+        var privateKey = MLKemPrivateKeyParameters.FromEncoding(MLKemParameters.ml_kem_1024, [.. privateKeyBytes]);
         return GenerateChrystalsKyberDecryptionKey(privateKey, encapsulatedKey, logger);
     }
 
-    internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(KyberPrivateKeyParameters privateKey, ReadOnlySpan<byte> encapsulatedKey, ILogger? logger)
+    internal static ImmutableArray<byte> GenerateChrystalsKyberDecryptionKey(MLKemPrivateKeyParameters privateKey, ReadOnlySpan<byte> encapsulatedKey, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(privateKey);
 
-        byte[] key_bytes;
+        MLKemDecapsulator dec = new(MLKemParameters.ml_kem_1024);
+        dec.Init(privateKey);
+
+        if (encapsulatedKey.Length != dec.EncapsulationLength) {
+            throw new ArgumentException("", nameof(encapsulatedKey));
+        }
+
+        var sharedSecretBytes = new byte[dec.SecretLength];
+        var sharedSecretSpan = sharedSecretBytes.AsSpan();
 
         // Exponential backoff
         const int baseBackoff = 100;
@@ -209,15 +215,15 @@ internal static class CryptoUtils
 
         try
         {
-            KyberKemExtractor extractor = new(privateKey);
-            key_bytes = extractor.ExtractSecret([.. encapsulatedKey]);
+            // Decapsulate
+            dec.Decapsulate(encapsulatedKey, sharedSecretSpan);
         }
         finally
         {
             mutex.ReleaseMutex(); // AbsorbBits in GenerateKeyPair() cannot handle threading.
         }
 
-        return [.. key_bytes];
+        return [.. sharedSecretBytes];
     }
 
     internal static Messages.Envelope EncryptEnvelopeInternal(byte[] envelopePayload, ImmutableArray<byte>? sharedKey, ILogger? logger)

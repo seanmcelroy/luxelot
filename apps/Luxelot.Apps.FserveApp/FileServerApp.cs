@@ -188,7 +188,7 @@ public class FserveApp : IServerApp
                      ProtVer = FS_PROTOCOL_VERSION,
                      Status = 400,
                      StatusMessage = "Initial exchange accepted, providing encapsulated key.",
-                     CipherText = ByteString.CopyFrom(encapsulatedKey),
+                     CipherText = ByteString.CopyFrom(encapsulatedKey.AsSpan()),
                      IdPubKey = ByteString.CopyFrom([.. appContext.IdentityKeyPublicBytes])
                  }, cancellationToken);
         };
@@ -202,7 +202,7 @@ public class FserveApp : IServerApp
                 ProtVer = FS_PROTOCOL_VERSION,
                 Status = 200,
                 StatusMessage = "Initial exchange accepted, providing encapsulated key.",
-                CipherText = ByteString.CopyFrom(encapsulatedKey),
+                CipherText = ByteString.CopyFrom(encapsulatedKey.AsSpan()),
                 IdPubKey = ByteString.CopyFrom([.. appContext.IdentityKeyPublicBytes])
             },
             cancellationToken);

@@ -443,7 +443,7 @@ internal class Peer : IDisposable
         var message = new Ack
         {
             ProtVer = Node.NODE_PROTOCOL_VERSION,
-            CipherText = ByteString.CopyFrom(encapsulatedKey),
+            CipherText = ByteString.CopyFrom(encapsulatedKey.AsSpan()),
             // Now provide our own identity key in the response Ack
             IdPubKey = ByteString.CopyFrom(nodeContext.NodeIdentityKeyPublicBytes.AsSpan()),
             Addr1 = addrs[0],
